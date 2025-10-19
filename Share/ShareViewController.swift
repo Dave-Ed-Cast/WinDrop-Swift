@@ -15,8 +15,8 @@ final class ShareViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        Task {
-            await handleSharedItem()
+        Task.detached {
+            await self.handleSharedItem()
         }
     }
 
@@ -27,24 +27,22 @@ final class ShareViewController: UIViewController {
         self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
     }
 
-    private func handleSharedItem() async {
-        guard let item = extensionContext?.inputItems.first as? NSExtensionItem,
-              let provider = item.attachments?.first else {
-            completeExtension("No attachments found")
-            return
+    nonisolated private func handleSharedItem() async {
+        
+        guard let (_, provider) = await extensionItem() else {
+            fatalError("Could not handle shared items")
         }
 
         do {
             let supportedTypes: [UTType] = [.image, .jpeg, .png, .tiff, .heic, .heif]
             guard let type = supportedTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
-                completeExtension("Unsupported type")
+                await completeExtension("Unsupported type")
                 return
             }
 
             let data: Data
             let filename: String
 
-            // Load the image data
             if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                 let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
                 if let url = item as? URL {
@@ -65,9 +63,19 @@ final class ShareViewController: UIViewController {
             let request = TransferRequest(data: data, filename: safeName, mimeType: mime)
 
             let result = await sender.send(request)
-            completeExtension(result)
+            await completeExtension(result)
         } catch {
-            completeExtension("Error: \(error.localizedDescription)")
+            await completeExtension("Error: \(error.localizedDescription)")
         }
+    }
+    
+    @MainActor
+    func extensionItem() async -> (NSExtensionItem, NSItemProvider)? {
+        guard let item = extensionContext?.inputItems.first as? NSExtensionItem,
+              let provider = item.attachments?.first else {
+            completeExtension("No attachments found")
+            return nil
+        }
+        return (item, provider)
     }
 }
