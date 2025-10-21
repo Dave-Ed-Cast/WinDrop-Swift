@@ -24,4 +24,13 @@ extension NWConnection {
             }
         }
     }
+    
+    // Ensure serialization of sends (Network.framework can coalesce, but we enforce ordering).
+    func sendAll(_ data: Data) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            self.send(content: data, completion: .contentProcessed { err in
+                if let err { cont.resume(throwing: err) } else { cont.resume() }
+            })
+        }
+    }
 }

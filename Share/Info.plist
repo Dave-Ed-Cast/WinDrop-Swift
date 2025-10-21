@@ -8,15 +8,7 @@
             <dict>
                 <key>NSExtensionActivationRule</key>
                 <string>
-                    SUBQUERY (
-                    extensionItems,
-                    $extensionItem,
-                    SUBQUERY (
-                    $extensionItem.attachments,
-                    $attachment,
-                    ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image"
-                    ).@count == $extensionItem.attachments.@count
-                    ).@count == 1
+                    TRUEPREDICATE
                 </string>
             </dict>
             <key>NSExtensionMainStoryboard</key>
