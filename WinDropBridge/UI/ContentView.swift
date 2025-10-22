@@ -39,7 +39,6 @@ struct ContentView: View {
                     .truncationMode(.middle)
             }
 
-            // Allow both photo and video picking
             PhotosPicker("Choose Photo or Video", selection: $selectedItem, matching: .any(of: [.images, .videos]))
                 .buttonStyle(.borderedProminent)
                 .onChange(of: selectedItem) { _, newItem in

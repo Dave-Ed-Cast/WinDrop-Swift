@@ -9,155 +9,114 @@ import Foundation
 import Network
 import UniformTypeIdentifiers
 
-
-
 final class WinDropSender: WinDropSending {
+    
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
     private var connection: NWConnection?
-
+    
     init(host: String, port: UInt16) {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: port)!
     }
-
-    // MARK: - Single-shot send (SIZE path; small files)
+    
     func send(_ request: TransferRequest) async -> String {
         await withCheckedContinuation { cont in
-            let connection = NWConnection(host: host, port: port, using: .tcp)
-            self.connection = connection
-
-            @Sendable func finish(_ msg: String) {
-                cont.resume(returning: msg)
-                connection.cancel()
-                Task { @MainActor in self.connection = nil }
-            }
-
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    Task.detached {
-                        do {
-                            var header = "FILENAME:\(request.filename)\n"
-                            header += "SIZE:\(request.data.count)\n"
-                            if let mime = request.mimeType { header += "MIME:\(mime)\n" }
-                            header += "ENDHEADER\n"
-                            try await connection.sendAll(Data(header.utf8))
-                            try await connection.sendAll(request.data)
-
-                            if let reply = try await connection.receive(maximumLength: 1024),
-                               let text = String(data: reply, encoding: .utf8) {
-                                finish("Server replied: \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
-                            } else {
-                                finish("No reply from server")
-                            }
-                        } catch {
-                            finish("Send failed: \(error.localizedDescription)")
-                        }
+            Task {
+                do {
+                    let reply = try await withConnection { conn in
+                        try await self.sendRequest(request, over: conn)
                     }
-                case .failed(let err):
-                    finish("Connection failed: \(err.localizedDescription)")
-                default:
-                    break
+                    cont.resume(returning: reply)
+                } catch {
+                    cont.resume(returning: "Send failed: \(error.localizedDescription)")
                 }
             }
-            connection.start(queue: .global())
         }
     }
 
-    // MARK: - Chunked streaming (length-prefixed frames)
-
-    /// Public API used by Files/Share paths. Streams a file in frames:
+    /// Streams a file as length-prefixed frames:
     /// [u32 big-endian length][length bytes] ... [0x00 00 00 00] EOF.
     @discardableResult
     func sendFileStream(url: URL, filename: String? = nil, chunkSize: Int = 256 * 1024) async throws -> String {
-        let name = filename ?? url.lastPathComponent
-        let ut = UTType(filenameExtension: url.pathExtension) ?? .data
-        let mime = ut.preferredMIMEType ?? "application/octet-stream"
+        try await withConnection { conn in
+            let name = filename ?? url.lastPathComponent
+            let ut = UTType(filenameExtension: url.pathExtension) ?? .data
+            let mime = ut.preferredMIMEType ?? "application/octet-stream"
+            
+            var header = "FILENAME:\(name)\n"
+            header += "MIME:\(mime)\n"
+            header += "CHUNKED:YES\nENDHEADER\n"
+            try await conn.sendAll(Data(header.utf8))
+            
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
 
+            for try await chunk in handle.bytesAsync(chunkSize: chunkSize) {
+                try await self.sendChunkFrame(chunk, over: conn)
+            }
+            
+            try await self.sendEOFFrame(over: conn)
+            _ = try? await conn.receive(maximumLength: 3)
+            return "Streamed \(name) successfully"
+        }
+    }
+
+    private func withConnection<T>(_ action: @escaping (NWConnection) async throws -> T) async throws -> T {
         let conn = NWConnection(host: host, port: port, using: .tcp)
         self.connection = conn
+        defer {
+            conn.cancel()
+            Task { @MainActor in self.connection = nil }
+        }
+        
+        try await conn.waitUntilReady()
+        return try await action(conn)
+    }
 
-        return try await withCheckedThrowingContinuation { cont in
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    Task.detached {
-                        do {
-                            // 1️⃣ Send CHUNKED header
-                            var header = "FILENAME:\(name)\n"
-                            header += "MIME:\(mime)\n"
-                            header += "CHUNKED:YES\nENDHEADER\n"
-                            try await conn.sendAll(Data(header.utf8))
-
-                            // 2️⃣ Stream the file
-                            let fh = try FileHandle(forReadingFrom: url)
-                            defer { try? fh.close() } // cleanup even on error
-
-                            while true {
-                                let data = try fh.read(upToCount: chunkSize) ?? Data()
-                                if data.isEmpty { break }
-                                try await self.sendChunkFrame(data, over: conn)
-                            }
-
-                            // 3️⃣ EOF frame
-                            try await self.sendEOFFrame(over: conn)
-
-                            // 4️⃣ Optional ACK from server
-                            _ = try? await conn.receive(maximumLength: 3)
-
-                            cont.resume(returning: "Streamed \(name) successfully")
-                        } catch {
-                            cont.resume(throwing: error)
-                        }
-
-                        // 5️⃣ Guaranteed cleanup (Swift style)
-                        conn.cancel()
-                        await MainActor.run { self.connection = nil }
-                    }
-
-                case .failed(let e):
-                    cont.resume(throwing: e)
-
-                default:
-                    break
-                }
+    private func sendRequest(_ request: TransferRequest, over conn: NWConnection) async throws -> String {
+        let header = buildHeader(for: request)
+        try await conn.sendAll(Data(header.utf8))
+        
+        if request.data.count > 512_000 {
+            let chunkSize = 256 * 1024
+            for offset in stride(from: 0, to: request.data.count, by: chunkSize) {
+                let end = min(offset + chunkSize, request.data.count)
+                let slice = request.data.subdata(in: offset..<end)
+                try await conn.sendAll(slice)
             }
-
-            conn.start(queue: .global())
+        } else {
+            try await conn.sendAll(request.data)
+        }
+        
+        if let reply = try await conn.receive(maximumLength: 1024),
+           let text = String(data: reply, encoding: .utf8) {
+            return "Server replied: \(text.trimmingCharacters(in: .whitespacesAndNewlines))"
+        } else {
+            return "No reply from server"
         }
     }
 
+    private func buildHeader(for request: TransferRequest) -> String {
+        var header = "FILENAME:\(request.filename)\n"
+        header += "SIZE:\(request.data.count)\n"
+        if let mime = request.mimeType { header += "MIME:\(mime)\n" }
+        header += "ENDHEADER\n"
+        return header
+    }
+}
+
+fileprivate extension WinDropSender {
     /// Frame = 4-byte BE length + payload
-    private func sendChunkFrame(_ payload: Data, over conn: NWConnection) async throws {
-        var len = UInt32(payload.count)
-        let lenBE = len.bigEndian
-        let lenData = withUnsafeBytes(of: lenBE) { Data($0) }
-        try await conn.sendAll(lenData)
+    func sendChunkFrame(_ payload: Data, over conn: NWConnection) async throws {
+        let len = withUnsafeBytes(of: UInt32(payload.count).bigEndian) { Data($0) }
+        try await conn.sendAll(len)
         try await conn.sendAll(payload)
     }
-
+    
     /// EOF frame = 4 zero bytes
-    private func sendEOFFrame(over conn: NWConnection) async throws {
-        var z: UInt32 = 0
-        let zBE = z.bigEndian
-        let eof = withUnsafeBytes(of: zBE) { Data($0) }
+    func sendEOFFrame(over conn: NWConnection) async throws {
+        let eof = withUnsafeBytes(of: UInt32.zero.bigEndian) { Data($0) }
         try await conn.sendAll(eof)
-    }
-
-    // MARK: - Legacy close hook (kept for interface compatibility)
-    func finishTransfer() async {
-        guard let connection else { return }
-        // Send EOF frame if the caller forgot (harmless if already sent)
-        do {
-            var z: UInt32 = 0
-            let zBE = z.bigEndian
-            let eof = withUnsafeBytes(of: zBE) { Data($0) }
-            try await connection.sendAll(eof)
-        } catch {
-            // ignore close errors
-        }
-        connection.cancel()
-        Task { @MainActor in self.connection = nil }
     }
 }

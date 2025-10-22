@@ -1,12 +1,11 @@
 //
 //  ShareViewController.swift
-//  Share
+//  WinDropBridge
 //
 //  Created by Davide Castaldi on 18/10/25.
 //
 
 import UIKit
-import Social
 import UniformTypeIdentifiers
 import Photos
 
@@ -15,103 +14,107 @@ final class ShareViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        Task.detached {
-            await self.handleSharedItem()
-        }
+        Task { await handleSharedItem() }
     }
 
-    @MainActor
     private func completeExtension(_ message: String? = nil) {
-        if let message {
-            print("[ShareExtension] \(message)")
-        }
-        extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+        if let msg = message { print("[ShareExtension] \(msg)") }
+        extensionContext?.completeRequest(returningItems: nil)
     }
 
-    nonisolated private func handleSharedItem() async {
-        guard let (_, provider) = await extensionItem() else {
-            await completeExtension("Could not handle shared items")
+    private func handleSharedItem() async {
+        guard let provider = await firstAttachmentProvider() else {
+            completeExtension("No attachments found")
             return
         }
 
         do {
-            let supportedTypes: [UTType] = [
-                .image, .jpeg, .png, .tiff, .heic, .heif,
-                .movie, .video, .mpeg4Movie, .quickTimeMovie,
-                .pdf
-            ]
-
-            guard let type = supportedTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
-                await completeExtension("Unsupported type")
+            guard let type = detectSupportedType(for: provider) else {
+                completeExtension("Unsupported type")
                 return
             }
 
-            // ===========================
-            // 1️⃣ IMAGE HANDLING (small, non-chunked)
-            // ===========================
-            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
-
-                let data: Data
-                let filename: String
-
-                if let url = item as? URL {
-                    filename = url.lastPathComponent
-                    data = try Data(contentsOf: url)
-                } else if let image = item as? UIImage,
-                          let jpeg = image.jpegData(compressionQuality: 1.0) {
-                    filename = "photo_\(Int(Date().timeIntervalSince1970)).jpg"
-                    data = jpeg
-                } else {
-                    throw AppError.loadFailed("Unsupported image item type")
-                }
-
-                let safeName = TransferRequest.sanitizeFilename(filename)
-                let mime = TransferRequest.mimeType(for: safeName)
-                let request = TransferRequest(data: data, filename: safeName, mimeType: mime)
-
+            if type.conforms(to: .image) {
+                let request = try await buildImageTransferRequest(from: provider, type: type)
                 let result = await sender.send(request)
-                await completeExtension(result)
+                completeExtension(result)
                 return
             }
 
-            // ===========================
-            // 2️⃣ VIDEO / LARGE FILE HANDLING (chunked)
-            // ===========================
-            if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
-                || provider.hasItemConformingToTypeIdentifier(UTType.video.identifier)
-                || provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-
-                let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
-                guard let url = item as? URL else {
-                    throw AppError.loadFailed("Unsupported file item type")
-                }
-
+            if type.conforms(to: .movie)
+                || type.conforms(to: .video)
+                || type.conforms(to: .audio)
+                || type == .pdf {
+                
+                let url = try await loadURL(from: provider, type: type)
                 let safeName = TransferRequest.sanitizeFilename(url.lastPathComponent)
                 print("[ShareExtension] Starting stream: \(safeName)")
 
                 do {
                     let result = try await sender.sendFileStream(url: url, filename: safeName)
-                    await completeExtension(result)
+                    completeExtension(result)
                 } catch {
-                    await completeExtension("Stream failed: \(error.localizedDescription)")
+                    completeExtension("Stream failed: \(error.localizedDescription)")
                 }
                 return
             }
 
-            await completeExtension("No supported data found")
+            completeExtension("No supported data found")
         } catch {
-            await completeExtension("Error: \(error.localizedDescription)")
+            completeExtension("Error: \(error.localizedDescription)")
         }
     }
 
-    @MainActor
-    func extensionItem() async -> (NSExtensionItem, NSItemProvider)? {
-        guard let item = extensionContext?.inputItems.first as? NSExtensionItem,
-              let provider = item.attachments?.first else {
-            completeExtension("No attachments found")
-            return nil
+    private func detectSupportedType(for provider: NSItemProvider) -> UTType? {
+        let supported: [UTType] = [
+            // Images
+            .image, .jpeg, .png, .tiff, .heic, .heif,
+            // Video
+            .movie, .video, .mpeg4Movie, .quickTimeMovie,
+            // Audio
+            .audio, .mp3, .wav, .aiff, .mpeg,
+            // Documents
+            .pdf
+        ]
+        return supported.first { provider.hasItemConformingToTypeIdentifier($0.identifier) }
+    }
+
+    private func firstAttachmentProvider() async -> NSItemProvider? {
+        guard
+            let item = extensionContext?.inputItems.first as? NSExtensionItem,
+            let provider = item.attachments?.first
+        else { return nil }
+        return provider
+    }
+
+    private func loadURL(from provider: NSItemProvider, type: UTType) async throws -> URL {
+        let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
+        guard let url = item as? URL else {
+            throw AppError.loadFailed("Unsupported URL type")
         }
-        return (item, provider)
+        return url
+    }
+
+    private func buildImageTransferRequest(from provider: NSItemProvider, type: UTType) async throws -> TransferRequest {
+        let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
+
+        let data: Data
+        let filename: String
+
+        if let url = item as? URL {
+            data = try Data(contentsOf: url, options: .mappedIfSafe)
+            filename = url.lastPathComponent
+        } else if let image = item as? UIImage,
+                  let jpeg = image.jpegData(compressionQuality: 1.0) {
+            data = jpeg
+            filename = "photo_\(Int(Date().timeIntervalSince1970)).jpg"
+        } else {
+            throw AppError.loadFailed("Unsupported image item type")
+        }
+
+        let safeName = TransferRequest.sanitizeFilename(filename)
+        let mime = TransferRequest.mimeType(for: safeName)
+        return TransferRequest(data: data, filename: safeName, mimeType: mime)
     }
 }
+
