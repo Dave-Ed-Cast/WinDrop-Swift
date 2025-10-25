@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 import Photos
 
 final class ShareViewController: UIViewController {
-    private let sender = WinDropSender(host: "192.168.1.160", port: 5050)
+    private let sender: WinDropSender? = WinDropSender(host: "192.168.1.160", port: 5050)
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -31,6 +31,11 @@ final class ShareViewController: UIViewController {
         do {
             guard let type = detectSupportedType(for: provider) else {
                 completeExtension("Unsupported type")
+                return
+            }
+
+            guard let sender = sender else {
+                completeExtension("Sender is unavailable")
                 return
             }
 
@@ -68,7 +73,7 @@ final class ShareViewController: UIViewController {
     private func detectSupportedType(for provider: NSItemProvider) -> UTType? {
         let supported: [UTType] = [
             // Images
-            .image, .jpeg, .png, .tiff, .heic, .heif,
+            .image, .jpeg, .png, .tiff, .heic, .heif, .jpeg,
             // Video
             .movie, .video, .mpeg4Movie, .quickTimeMovie,
             // Audio
@@ -117,4 +122,3 @@ final class ShareViewController: UIViewController {
         return TransferRequest(data: data, filename: safeName, mimeType: mime)
     }
 }
-

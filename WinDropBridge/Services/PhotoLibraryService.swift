@@ -12,17 +12,15 @@ import _PhotosUI_SwiftUI
 
 /// Handles Photo library authorization and media extraction.
 final class PhotoLibraryService {
-    
     func ensurePhotosAuth() async throws {
         let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if current == .authorized || current == .limited { return }
-        
         let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard newStatus == .authorized || newStatus == .limited else {
             throw AppError.permissionDenied
         }
     }
-    
+
     /// Returns a `TransferRequest` with original data and MIME info.
     func buildTransferRequest(from item: PhotosPickerItem) async throws -> TransferRequest {
         guard let id = item.itemIdentifier else {
@@ -31,7 +29,7 @@ final class PhotoLibraryService {
         try await ensurePhotosAuth()
         return try await loadFromPhotos(id: id)
     }
-    
+
     private func loadFromItemProvider(_ item: PhotosPickerItem) async throws -> TransferRequest {
         if let url = try? await item.loadTransferable(type: URL.self) {
             let name = TransferRequest.sanitizeFilename(url.lastPathComponent)
@@ -42,11 +40,11 @@ final class PhotoLibraryService {
                 mimeType: TransferRequest.mimeType(for: name)
             )
         }
-        
+
         guard let data = try await item.loadTransferable(type: Data.self) else {
             throw AppError.loadFailed("Unable to load non-Photos item")
         }
-        
+
         let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "bin"
         let name = TransferRequest.sanitizeFilename("shared_\(Int(Date().timeIntervalSince1970)).\(ext)")
         return .init(
@@ -55,26 +53,26 @@ final class PhotoLibraryService {
             mimeType: TransferRequest.mimeType(for: name)
         )
     }
-    
+
     private func loadFromPhotos(id: String) async throws -> TransferRequest {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
             throw AppError.assetNotFound
         }
-        
+
         let isVideo = asset.mediaType == .video
         let resources = PHAssetResource.assetResources(for: asset)
-        
+
         guard let resource = resources.first(where: {
             isVideo ? ($0.type == .video || $0.type == .fullSizeVideo)
                     : ($0.type == .photo || $0.type == .fullSizePhoto)
         }) ?? resources.first else {
             throw AppError.resourceMissing
         }
-        
+
         let filename = await determineFilename(for: asset, resource: resource, isVideo: isVideo)
         let safeName = TransferRequest.sanitizeFilename(filename)
         let buffer = try await fetchAssetData(for: resource)
-        
+
         return .init(
             data: buffer,
             filename: safeName,
@@ -86,10 +84,8 @@ final class PhotoLibraryService {
         try await withCheckedThrowingContinuation { cont in
             let opts = PHAssetResourceRequestOptions()
             opts.isNetworkAccessAllowed = true
-            
             var buffer = Data()
             buffer.reserveCapacity(2_000_000)
-            
             PHAssetResourceManager.default().requestData(for: resource, options: opts) { chunk in
                 buffer.append(chunk)
             } completionHandler: { error in
@@ -101,7 +97,7 @@ final class PhotoLibraryService {
             }
         }
     }
-    
+
     private func determineFilename(for asset: PHAsset, resource: PHAssetResource, isVideo: Bool) async -> String {
         if !resource.originalFilename.isEmpty {
             return resource.originalFilename
@@ -123,7 +119,10 @@ final class PhotoLibraryService {
                 cont.resume()
             }
         }
-        return fallback?.isEmpty == false ? fallback! : "photo_\(Int(Date().timeIntervalSince1970)).jpg"
+        if let fallback, !fallback.isEmpty {
+            return fallback
+        } else {
+            return "photo_\(Int(Date().timeIntervalSince1970)).jpg"
+        }
     }
 }
-

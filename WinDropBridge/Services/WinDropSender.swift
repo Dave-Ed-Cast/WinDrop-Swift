@@ -15,9 +15,10 @@ final class WinDropSender: WinDropSending {
     private let port: NWEndpoint.Port
     private var connection: NWConnection?
     
-    init(host: String, port: UInt16) {
+    init?(host: String, port: UInt16) {
         self.host = NWEndpoint.Host(host)
-        self.port = NWEndpoint.Port(rawValue: port)!
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
+        self.port = nwPort
     }
     
     func send(_ request: TransferRequest) async -> String {
@@ -41,8 +42,8 @@ final class WinDropSender: WinDropSending {
     func sendFileStream(url: URL, filename: String? = nil, chunkSize: Int = 256 * 1024) async throws -> String {
         try await withConnection { conn in
             let name = filename ?? url.lastPathComponent
-            let ut = UTType(filenameExtension: url.pathExtension) ?? .data
-            let mime = ut.preferredMIMEType ?? "application/octet-stream"
+            let utt = UTType(filenameExtension: url.pathExtension) ?? .data
+            let mime = utt.preferredMIMEType ?? "application/octet-stream"
             
             var header = "FILENAME:\(name)\n"
             header += "MIME:\(mime)\n"

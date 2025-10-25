@@ -19,7 +19,7 @@ enum AppError: Error, LocalizedError {
         case .permissionDenied: return "Photos permission not granted"
         case .assetNotFound: return "Selected asset not found"
         case .resourceMissing: return "No valid resource for asset"
-        case .loadFailed(let m): return m
+        case .loadFailed(let msg): return msg
         }
     }
 }
@@ -31,8 +31,8 @@ struct TransferRequest {
 
     static func mimeType(for filename: String) -> String? {
         let ext = (filename as NSString).pathExtension.lowercased()
-        guard let ut = UTType(filenameExtension: ext) else { return nil }
-        return ut.preferredMIMEType
+        guard let utt = UTType(filenameExtension: ext) else { return nil }
+        return utt.preferredMIMEType
     }
 
     static func sanitizeFilename(_ name: String) -> String {

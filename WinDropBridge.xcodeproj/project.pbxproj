@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		3ED627932EA4419800AD4DEF /* Share.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3ED627892EA4419800AD4DEF /* Share.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3EE721E12EACED3C0012C30A /* .swiftlint.yml in Resources */ = {isa = PBXBuildFile; fileRef = 3EE721E02EACED3C0012C30A /* .swiftlint.yml */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,6 +38,7 @@
 /* Begin PBXFileReference section */
 		3E8800ED2EA2A65D006C95ED /* WinDropBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WinDropBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3ED627892EA4419800AD4DEF /* Share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = Share.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		3EE721E02EACED3C0012C30A /* .swiftlint.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = .swiftlint.yml; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -46,7 +48,9 @@
 				Domain/TransferModels.swift,
 				Extension/FileHandle.swift,
 				Extension/NWConnection.swift,
+				Extension/PHPhotoLibrary.swift,
 				Extension/Protocol.swift,
+				Services/WinDropReceiver.swift,
 				Services/WinDropSender.swift,
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
@@ -103,6 +107,7 @@
 				3E8800EF2EA2A65D006C95ED /* WinDropBridge */,
 				3ED6278A2EA4419800AD4DEF /* Share */,
 				3E8800EE2EA2A65D006C95ED /* Products */,
+				3EE721E02EACED3C0012C30A /* .swiftlint.yml */,
 			);
 			sourceTree = "<group>";
 		};
@@ -126,6 +131,7 @@
 				3E8800EA2EA2A65D006C95ED /* Frameworks */,
 				3E8800EB2EA2A65D006C95ED /* Resources */,
 				3ED627942EA4419800AD4DEF /* Embed Foundation Extensions */,
+				3ECE1D2E2EACE062002579AB /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -214,10 +220,32 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3EE721E12EACED3C0012C30A /* .swiftlint.yml in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3ECE1D2E2EACE062002579AB /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# SwiftLint Build Phase Script\n# Place this *before* \"Compile Sources\" in your Xcode build phases.\n\nSWIFTLINT=\"/opt/homebrew/bin/swiftlint\"\nCONFIG_PATH=\"${SRCROOT}/.swiftlint.yml\"\n\n# Function to run linting\nrun_swiftlint() {\n  echo \"SwiftLint found ✅\"\n  echo \"Using config: $CONFIG_PATH\"\n  echo \"Linting source files...\"\n  \"$SWIFTLINT\" lint --config \"$CONFIG_PATH\" --quiet --no-cache\n}\n\n# Main\nif [ -x \"$SWIFTLINT\" ]; then\n  if [ -f \"$CONFIG_PATH\" ]; then\n    run_swiftlint\n  else\n    echo \"⚠️  SwiftLint config not found at: $CONFIG_PATH\"\n    echo \"Running SwiftLint with default rules...\"\n    \"$SWIFTLINT\" lint --quiet --no-cache\n  fi\nelse\n  echo \"⚠️  SwiftLint not found at $SWIFTLINT\"\n  echo \"👉  Install it with: brew install swiftlint\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		3E8800E92EA2A65D006C95ED /* Sources */ = {
@@ -375,7 +403,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WLW428B75Y;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "I truly need it.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "I need it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -411,7 +442,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WLW428B75Y;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "I truly need it.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "I need it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
