@@ -44,23 +44,24 @@ final class WinDropReceiver {
             conn.cancel()
             activeConnections.removeValue(forKey: id)
         }
-        
+
         do {
-            let headerData = try await conn.readUntil("ENDHEADER\n")
-            let headerText = String(decoding: headerData, as: UTF8.self)
-            guard let meta = parseHeader(headerText) else {
+            let reader = BufferedNWConnection(conn)
+            // 1) read header *without* consuming body bytes
+            let headerBytes = try await reader.readUntil(Data("ENDHEADER\n".utf8))
+            guard let headerText = String(data: headerBytes, encoding: .utf8),
+                  let meta = parseHeader(headerText) else {
                 lastMessage = "Invalid header"
                 return
             }
-            
-            let saveURL = FileManager.default
-                .urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent(meta.filename)
-            
+
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let saveURL = docs.appendingPathComponent(meta.filename)
+
             lastMessage = "Receiving \(meta.filename)..."
-            
-            try await conn.receiveFile(to: saveURL, size: meta.size)
-            
+            // 2) receive exactly meta.size bytes
+            try await reader.receiveFile(to: saveURL, size: meta.size)
+
             lastMessage = "Saved to: \(saveURL.lastPathComponent)"
             await saveToAppropriateLibrary(url: saveURL, mime: meta.mime)
         } catch {
@@ -98,27 +99,22 @@ final class WinDropReceiver {
     
     @MainActor
     private func saveToPhotos(url: URL, isVideo: Bool) async {
+        // Request add-only if needed
         if PHPhotoLibrary.authorizationStatus(for: .addOnly) == .notDetermined {
             _ = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         }
-
         guard PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized else {
             lastMessage = "Photos access denied."
             return
         }
 
-        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-        do {
-            if FileManager.default.fileExists(atPath: tmpURL.path) {
-                try FileManager.default.removeItem(at: tmpURL)
-            }
-            try FileManager.default.copyItem(at: url, to: tmpURL)
-        } catch {
-            lastMessage = "File copy error: \(error.localizedDescription)"
-            return
-        }
+        // Copy to a temp *.ext that matches MIME (helps Photos sniffers)
+        let ext = url.pathExtension.isEmpty ? (isVideo ? "mp4" : "jpg") : url.pathExtension
+        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
 
         do {
+            if FileManager.default.fileExists(atPath: tmpURL.path) { try FileManager.default.removeItem(at: tmpURL) }
+            try FileManager.default.copyItem(at: url, to: tmpURL)
             try await PHPhotoLibrary.performChangesAsync {
                 if isVideo {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tmpURL)
