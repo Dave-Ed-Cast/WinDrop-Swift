@@ -9,6 +9,7 @@ import Foundation
 import Network
 import Photos
 
+
 @MainActor
 @Observable
 final class WinDropReceiver {
@@ -47,7 +48,6 @@ final class WinDropReceiver {
 
         do {
             let reader = BufferedNWConnection(conn)
-            // 1) read header *without* consuming body bytes
             let headerBytes = try await reader.readUntil(Data("ENDHEADER\n".utf8))
             guard let headerText = String(data: headerBytes, encoding: .utf8),
                   let meta = parseHeader(headerText) else {
@@ -59,7 +59,6 @@ final class WinDropReceiver {
             let saveURL = docs.appendingPathComponent(meta.filename)
 
             lastMessage = "Receiving \(meta.filename)..."
-            // 2) receive exactly meta.size bytes
             try await reader.receiveFile(to: saveURL, size: meta.size)
 
             lastMessage = "Saved to: \(saveURL.lastPathComponent)"
@@ -69,8 +68,7 @@ final class WinDropReceiver {
         }
     }
     
-    /// Parses a simple header string in the format:
-    private func parseHeader(_ text: String) -> (filename: String, size: Int, mime: String)? {
+    private func parseHeader(_ text: String) -> HeaderMeta? {
         var filename = ""
         var size: Int = 0
         var mime = "application/octet-stream"
@@ -84,13 +82,20 @@ final class WinDropReceiver {
                 mime = String(line.dropFirst("MIME:".count))
             }
         }
-        return filename.isEmpty || size <= 0 ? nil : (filename, size, mime)
+        return filename.isEmpty || size <= 0 ? nil : HeaderMeta(filename: filename, size: size, mime: mime)
     }
     
     @MainActor
     func saveToAppropriateLibrary(url: URL, mime: String) async {
         if mime.starts(with: "image/") || mime.starts(with: "video/") {
-            await saveToPhotos(url: url, isVideo: mime.starts(with: "video/"))
+            let imported = await saveToPhotos(url: url, isVideo: mime.starts(with: "video/"))
+            if imported {
+                // delete the local copy if successfully added to Photos
+                try? FileManager.default.removeItem(at: url)
+                lastMessage = "Imported to Photos: \(url.lastPathComponent)"
+            } else {
+                lastMessage = "Failed to import to Photos, kept in Files."
+            }
         } else {
             lastMessage = "Non-media file saved: \(url.lastPathComponent)"
         }
@@ -98,23 +103,26 @@ final class WinDropReceiver {
     
     
     @MainActor
-    private func saveToPhotos(url: URL, isVideo: Bool) async {
-        // Request add-only if needed
+    private func saveToPhotos(url: URL, isVideo: Bool) async -> Bool {
         if PHPhotoLibrary.authorizationStatus(for: .addOnly) == .notDetermined {
             _ = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         }
         guard PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized else {
             lastMessage = "Photos access denied."
-            return
+            return false
         }
 
-        // Copy to a temp *.ext that matches MIME (helps Photos sniffers)
         let ext = url.pathExtension.isEmpty ? (isVideo ? "mp4" : "jpg") : url.pathExtension
-        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ext)
 
         do {
-            if FileManager.default.fileExists(atPath: tmpURL.path) { try FileManager.default.removeItem(at: tmpURL) }
+            if FileManager.default.fileExists(atPath: tmpURL.path) {
+                try FileManager.default.removeItem(at: tmpURL)
+            }
             try FileManager.default.copyItem(at: url, to: tmpURL)
+
             try await PHPhotoLibrary.performChangesAsync {
                 if isVideo {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tmpURL)
@@ -122,12 +130,13 @@ final class WinDropReceiver {
                     PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: tmpURL)
                 }
             }
-            lastMessage = "Imported to Photos: \(url.lastPathComponent)"
-        } catch {
-            lastMessage = "Failed to import: \(error.localizedDescription)"
-            print("[WinDropReceiver] Import error:", error)
-        }
 
-        try? FileManager.default.removeItem(at: tmpURL)
+            try? FileManager.default.removeItem(at: tmpURL)
+            return true
+        } catch {
+            print("[WinDropReceiver] Import error:", error)
+            try? FileManager.default.removeItem(at: tmpURL)
+            return false
+        }
     }
 }

@@ -11,10 +11,14 @@ import Network
 /// Stateful reader that preserves overflow (bytes read beyond a delimiter).
 final class BufferedNWConnection {
     private let conn: NWConnection
-    private var buffer = Data()
-    private let chunkSize = 8192
+    private var buffer: Data
+    private let chunkSize: Int
 
-    init(_ conn: NWConnection) { self.conn = conn }
+    init(_ conn: NWConnection) {
+        self.conn = conn
+        self.buffer = Data()
+        self.chunkSize = 8192
+    }
 
     /// Reads until delimiter bytes appear; returns payload before delimiter.
     func readUntil(_ delimiter: Data) async throws -> Data {
@@ -22,7 +26,7 @@ final class BufferedNWConnection {
         while true {
             if let range = buffer.range(of: delimiter) {
                 let payload = buffer[..<range.lowerBound]
-                buffer.removeSubrange(..<range.upperBound) // drop payload+delimiter, keep overflow
+                buffer.removeSubrange(..<range.upperBound)
                 return Data(payload)
             }
             // need more bytes
@@ -50,11 +54,9 @@ final class BufferedNWConnection {
                 guard let data, !data.isEmpty else {
                     if isComplete {
                         cont.resume(returning: Data())
-                    }
-                    else {
-                        Task {
-                            await cont.resume(throwing: self.makeError("Empty read"))
-                        }
+                    } else {
+                        let error = self.makeError("Empty read")
+                        Task.detached { cont.resume(throwing: error) }
                     }
                     return
                 }
@@ -63,7 +65,7 @@ final class BufferedNWConnection {
         }
     }
 
-    private func makeError(_ msg: String) -> NSError {
+    nonisolated private func makeError(_ msg: String) -> NSError {
         NSError(domain: "BufferedNWConnection", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
     }
     

@@ -36,33 +36,6 @@ final class WinDropSender: WinDropSending {
         }
     }
 
-    /// Streams a file as length-prefixed frames:
-    /// [u32 big-endian length][length bytes] ... [0x00 00 00 00] EOF.
-    @discardableResult
-    func sendFileStream(url: URL, filename: String? = nil, chunkSize: Int = 256 * 1024) async throws -> String {
-        try await withConnection { conn in
-            let name = filename ?? url.lastPathComponent
-            let utt = UTType(filenameExtension: url.pathExtension) ?? .data
-            let mime = utt.preferredMIMEType ?? "application/octet-stream"
-            
-            var header = "FILENAME:\(name)\n"
-            header += "MIME:\(mime)\n"
-            header += "CHUNKED:YES\nENDHEADER\n"
-            try await conn.sendAll(Data(header.utf8))
-            
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-
-            for try await chunk in handle.bytesAsync(chunkSize: chunkSize) {
-                try await self.sendChunkFrame(chunk, over: conn)
-            }
-            
-            try await self.sendEOFFrame(over: conn)
-            _ = try? await conn.receive(maximumLength: 3)
-            return "Streamed \(name) successfully"
-        }
-    }
-
     private func withConnection<T>(_ action: @escaping (NWConnection) async throws -> T) async throws -> T {
         let conn = NWConnection(host: host, port: port, using: .tcp)
         self.connection = conn
@@ -76,20 +49,25 @@ final class WinDropSender: WinDropSending {
     }
 
     private func sendRequest(_ request: TransferRequest, over conn: NWConnection) async throws -> String {
-        let header = buildHeader(for: request)
-        try await conn.sendAll(Data(header.utf8))
-        
+        let meta = HeaderMeta(
+            filename: request.filename,
+            size: request.data.count,
+            mime: request.mimeType ?? "application/octet-stream",
+            chunked: false
+        )
+        try await conn.sendAll(Data(meta.serialize().utf8))
+
+        // body
         if request.data.count > 512_000 {
             let chunkSize = 256 * 1024
             for offset in stride(from: 0, to: request.data.count, by: chunkSize) {
                 let end = min(offset + chunkSize, request.data.count)
-                let slice = request.data.subdata(in: offset..<end)
-                try await conn.sendAll(slice)
+                try await conn.sendAll(request.data.subdata(in: offset..<end))
             }
         } else {
             try await conn.sendAll(request.data)
         }
-        
+
         if let reply = try await conn.receive(maximumLength: 1024),
            let text = String(data: reply, encoding: .utf8) {
             return "Server replied: \(text.trimmingCharacters(in: .whitespacesAndNewlines))"
@@ -98,12 +76,26 @@ final class WinDropSender: WinDropSending {
         }
     }
 
-    private func buildHeader(for request: TransferRequest) -> String {
-        var header = "FILENAME:\(request.filename)\n"
-        header += "SIZE:\(request.data.count)\n"
-        if let mime = request.mimeType { header += "MIME:\(mime)\n" }
-        header += "ENDHEADER\n"
-        return header
+    /// Streams a file as length-prefixed frames:
+    /// [u32 big-endian length][length bytes] ... [0x00 00 00 00] EOF.
+    @discardableResult
+    func sendFileStream(url: URL, filename: String? = nil, chunkSize: Int = 256 * 1024) async throws -> String {
+        try await withConnection { conn in
+            let name = filename ?? url.lastPathComponent
+            let mime = (UTType(filenameExtension: url.pathExtension) ?? .data).preferredMIMEType ?? "application/octet-stream"
+
+            let meta = HeaderMeta(filename: name, size: 0, mime: mime, chunked: true)
+            try await conn.sendAll(Data(meta.serialize().utf8))
+
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            for try await chunk in handle.bytesAsync(chunkSize: chunkSize) {
+                try await self.sendChunkFrame(chunk, over: conn)
+            }
+            try await self.sendEOFFrame(over: conn)
+            _ = try? await conn.receive(maximumLength: 3) // optional ACK
+            return "Streamed \(name) successfully"
+        }
     }
 }
 

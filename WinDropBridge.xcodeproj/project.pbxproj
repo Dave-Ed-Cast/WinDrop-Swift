@@ -45,6 +45,7 @@
 		3E481E022EA4465F00B51C47 /* Exceptions for "WinDropBridge" folder in "Share" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Data/HeaderMeta.swift,
 				Domain/TransferModels.swift,
 				Extension/BufferedNWConnection.swift,
 				Extension/FileHandle.swift,
@@ -63,12 +64,20 @@
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
 		};
+		3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3E8800EC2EA2A65D006C95ED /* WinDropBridge */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3E8800EF2EA2A65D006C95ED /* WinDropBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */,
 				3E481E022EA4465F00B51C47 /* Exceptions for "WinDropBridge" folder in "Share" target */,
 			);
 			path = WinDropBridge;
@@ -406,7 +415,10 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WinDropBridge/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "I really need it.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "I truly need it.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "I need it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -445,7 +457,10 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WinDropBridge/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "I really need it.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "I truly need it.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "I need it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
