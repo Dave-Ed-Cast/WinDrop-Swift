@@ -13,7 +13,6 @@ final class WinDropSender: WinDropSending {
     
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
-    private var connection: NWConnection?
     
     init?(host: String, port: UInt16) {
         self.host = NWEndpoint.Host(host)
@@ -38,10 +37,8 @@ final class WinDropSender: WinDropSending {
 
     private func withConnection<T>(_ action: @escaping (NWConnection) async throws -> T) async throws -> T {
         let conn = NWConnection(host: host, port: port, using: .tcp)
-        self.connection = conn
         defer {
             conn.cancel()
-            Task { @MainActor in self.connection = nil }
         }
         
         try await conn.waitUntilReady()
@@ -56,8 +53,8 @@ final class WinDropSender: WinDropSending {
             chunked: false
         )
         try await conn.sendAll(Data(meta.serialize().utf8))
-
-        // body
+        print(request.filename)
+        
         if request.data.count > 512_000 {
             let chunkSize = 256 * 1024
             for offset in stride(from: 0, to: request.data.count, by: chunkSize) {

@@ -19,7 +19,7 @@ struct ContentView: View {
             sender: sender
         )
     }()
-    @State private var selectedItem: PhotosPickerItem?
+    @State private var selectedItem: [PhotosPickerItem] = []
     @State private var receiver = WinDropReceiver()
     
     var body: some View {
@@ -55,8 +55,8 @@ struct ContentView: View {
             
             PhotosPicker("Choose Photo or Video", selection: $selectedItem, matching: .any(of: [.images, .videos]))
             .buttonStyle(.borderedProminent)
-            .onChange(of: selectedItem) { _, newItem in
-                tvm.handleSelection(newItem)
+            .onChange(of: selectedItem) { _, newItems in
+                tvm.handleSelection(newItems)
             }
             
             Text(tvm.status)

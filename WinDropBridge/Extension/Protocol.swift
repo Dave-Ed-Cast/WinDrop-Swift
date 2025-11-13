@@ -8,7 +8,7 @@
 import Foundation
 
 /// Protocol your app references (unchanged)
-protocol WinDropSending {
+protocol WinDropSending: Sendable {
     func send(_ request: TransferRequest) async -> String
     func sendFileStream(url: URL, filename: String?, chunkSize: Int) async throws -> String
 }

@@ -14,7 +14,7 @@ extension NWConnection {
         case dns(Int32)
         case tls(OSStatus)
     }
-
+    
     func send(content: Data) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.send(content: content, completion: .contentProcessed { error in

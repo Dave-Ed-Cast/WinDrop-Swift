@@ -31,7 +31,9 @@ final class PhotoLibraryService {
     }
 
     private func loadFromItemProvider(_ item: PhotosPickerItem) async throws -> TransferRequest {
+        // 1️⃣ If user picked a file (from Files app)
         if let url = try? await item.loadTransferable(type: URL.self) {
+            // Use the real file name from URL
             let name = TransferRequest.sanitizeFilename(url.lastPathComponent)
             let data = try Data(contentsOf: url, options: .mappedIfSafe)
             return .init(
@@ -41,12 +43,34 @@ final class PhotoLibraryService {
             )
         }
 
+        // 2️⃣ If user picked from Photos (Photos app)
+        if let assetID = item.itemIdentifier,
+           let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject,
+           let resource = PHAssetResource.assetResources(for: asset).first {
+            
+            // Fetch the original data
+            let data = try await fetchAssetData(for: resource)
+            
+            // Use the *original* filename from Photos
+            let name = TransferRequest.makeFilename(from: resource, asset: asset)
+            print(name)
+            
+            return .init(
+                data: data,
+                filename: name,
+                mimeType: TransferRequest.mimeType(for: name)
+            )
+        }
+
+        // 3️⃣ Fallback for unexpected cases (just raw data)
         guard let data = try await item.loadTransferable(type: Data.self) else {
             throw AppError.loadFailed("Unable to load non-Photos item")
         }
-
+        
+        // Generate a safe fallback name (very rare)
         let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "bin"
-        let name = TransferRequest.sanitizeFilename("shared_\(Int(Date().timeIntervalSince1970)).\(ext)")
+        let name = TransferRequest.sanitizeFilename("file_\(UUID().uuidString.prefix(6)).\(ext)")
+        
         return .init(
             data: data,
             filename: name,
@@ -98,31 +122,28 @@ final class PhotoLibraryService {
         }
     }
 
-    private func determineFilename(for asset: PHAsset, resource: PHAssetResource, isVideo: Bool) async -> String {
-        if !resource.originalFilename.isEmpty {
-            return resource.originalFilename
-        }
-        if isVideo {
-            return "video_\(Int(Date().timeIntervalSince1970)).mov"
+    private func determineFilename(
+        for asset: PHAsset,
+        resource: PHAssetResource,
+        isVideo: Bool
+    ) async -> String {
+        // 1️⃣ Get the initial candidate filename (exact from Photos)
+        var base = resource.originalFilename
+        if base.isEmpty { base = isVideo ? "video.mov" : "photo.jpg"  }
+
+        // 2️⃣ Sanitize (remove invalid characters)
+        base = TransferRequest.sanitizeFilename(base)
+
+        // 3️⃣ Get your save directory (Documents, or change as needed)
+        guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return base }
+        
+        var filename = TransferRequest.makeFilename(from: resource, asset: asset)
+        
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent(filename).path) {
+            filename = TransferRequest.makeFilename(from: resource, asset: asset, addDisambiguator: true)
         }
 
-        let opts = PHImageRequestOptions()
-        opts.isNetworkAccessAllowed = true
-        opts.version = .original
-        
-        var fallback: String?
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: opts) { _, _, _, info in
-                if let url = info?["PHImageFileURLKey"] as? URL {
-                    fallback = FileManager.default.displayName(atPath: url.path)
-                }
-                cont.resume()
-            }
-        }
-        if let fallback, !fallback.isEmpty {
-            return fallback
-        } else {
-            return "photo_\(Int(Date().timeIntervalSince1970)).jpg"
-        }
+        // 5️⃣ Return the final safe and unique filename
+        return filename
     }
 }
