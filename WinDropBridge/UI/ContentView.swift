@@ -19,7 +19,7 @@ struct ContentView: View {
             sender: sender
         )
     }()
-    @State private var selectedItem: [PhotosPickerItem] = []
+    @State private var selectedItems: [PhotosPickerItem] = []
     @State private var receiver = WinDropReceiver()
     
     var body: some View {
@@ -53,9 +53,15 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
             
-            PhotosPicker("Choose Photo or Video", selection: $selectedItem, matching: .any(of: [.images, .videos]))
+            PhotosPicker(
+                "Choose Photo or Video to upload",
+                selection: $selectedItems,
+                maxSelectionCount: 10,
+                matching: .any(of: [.images, .videos]),
+                photoLibrary: .shared()
+            )
             .buttonStyle(.borderedProminent)
-            .onChange(of: selectedItem) { _, newItems in
+            .onChange(of: selectedItems) { _, newItems in
                 tvm.handleSelection(newItems)
             }
             

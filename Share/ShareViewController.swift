@@ -104,21 +104,55 @@ final class ShareViewController: UIViewController {
         let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
 
         let data: Data
-        let filename: String
 
         if let url = item as? URL {
-            data = try Data(contentsOf: url, options: .mappedIfSafe)
-            filename = url.lastPathComponent
-        } else if let image = item as? UIImage,
-                  let jpeg = image.jpegData(compressionQuality: 1.0) {
+            data = try Data(contentsOf: url)
+        } else if let image = item as? UIImage, let jpeg = image.jpegData(compressionQuality: 1.0) {
             data = jpeg
-            filename = "photo_\(Int(Date().timeIntervalSince1970)).jpg"
         } else {
             throw AppError.loadFailed("Unsupported image item type")
         }
 
-        let safeName = TransferRequest.sanitizeFilename(filename)
-        let mime = TransferRequest.mimeType(for: safeName)
-        return TransferRequest(data: data, filename: safeName, mimeType: mime)
+        // NEW → universal filename resolver
+        let filename = await TransferRequest.resolveFilename(provider: provider, item: item)
+
+        let safe = TransferRequest.sanitizeFilename(filename)
+        let mime = TransferRequest.mimeType(for: safe)
+
+        return .init(data: data, filename: safe, mimeType: mime)
+    }
+    
+    // MARK: - PHAsset filename extraction
+
+    private func loadAssetFilename(from provider: NSItemProvider) async -> String? {
+        // 1) Look for the Photos asset identifier (com.apple.photos.asset)
+        guard provider.hasItemConformingToTypeIdentifier("com.apple.photos.asset") else {
+            return nil
+        }
+
+        do {
+            let item = try await provider.loadItem(
+                forTypeIdentifier: "com.apple.photos.asset",
+                options: nil
+            )
+
+            guard let assetID = item as? String else { return nil }
+
+            // 2) Fetch PHAsset
+            let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+            guard let asset = result.firstObject else { return nil }
+
+            // 3) Extract real filename via PHAssetResource
+            let resources = PHAssetResource.assetResources(for: asset)
+
+            if let primary = resources.first(where: { $0.type == .photo || $0.type == .video }) {
+                return primary.originalFilename
+            }
+
+            return resources.first?.originalFilename
+        } catch {
+            print("[ShareExtension] loadAssetFilename failed: \(error)")
+            return nil
+        }
     }
 }

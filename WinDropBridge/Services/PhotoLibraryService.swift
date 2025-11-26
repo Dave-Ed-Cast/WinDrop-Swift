@@ -31,11 +31,12 @@ final class PhotoLibraryService {
     }
 
     private func loadFromItemProvider(_ item: PhotosPickerItem) async throws -> TransferRequest {
-        // 1️⃣ If user picked a file (from Files app)
+        // 1️⃣ Files app or iCloud Drive → URL-backed
+        
         if let url = try? await item.loadTransferable(type: URL.self) {
-            // Use the real file name from URL
             let name = TransferRequest.sanitizeFilename(url.lastPathComponent)
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            let data = try Data(contentsOf: url)
+            print("[PhotoLibraryService] Using URL branch, name = \(name)")
             return .init(
                 data: data,
                 filename: name,
@@ -43,18 +44,37 @@ final class PhotoLibraryService {
             )
         }
 
-        // 2️⃣ If user picked from Photos (Photos app)
-        if let assetID = item.itemIdentifier,
-           let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject,
-           let resource = PHAssetResource.assetResources(for: asset).first {
-            
-            // Fetch the original data
-            let data = try await fetchAssetData(for: resource)
-            
-            // Use the *original* filename from Photos
-            let name = TransferRequest.makeFilename(from: resource, asset: asset)
-            print(name)
-            
+        // 2️⃣ Photos app → use itemIdentifier to resolve filename + PHAssetResource
+        if let assetID = item.itemIdentifier {
+            print("[PhotoLibraryService] itemIdentifier = \(assetID)")
+            let results = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+            if let asset = results.firstObject {
+                let resources = PHAssetResource.assetResources(for: asset)
+
+                guard let resource = resources.first else {
+                    throw AppError.resourceMissing
+                }
+
+                let data = try await fetchAssetData(for: resource, asset: asset)
+                let filename = TransferRequest.sanitizeFilename(resource.originalFilename)
+                print("[PhotoLibraryService] Using PHAsset branch, filename = \(filename)")
+
+                return .init(
+                    data: data,
+                    filename: filename,
+                    mimeType: TransferRequest.mimeType(for: filename)
+                )
+            } else {
+                print("[PhotoLibraryService] No PHAsset found for id \(assetID)")
+            }
+        } else {
+            print("[PhotoLibraryService] itemIdentifier is NIL")
+        }
+
+        // 3️⃣ Fallback — raw Data without metadata
+        if let data = try? await item.loadTransferable(type: Data.self) {
+            let name = "photo.jpg"
+            print("[PhotoLibraryService] FALLBACK branch, using name = \(name)")
             return .init(
                 data: data,
                 filename: name,
@@ -62,20 +82,7 @@ final class PhotoLibraryService {
             )
         }
 
-        // 3️⃣ Fallback for unexpected cases (just raw data)
-        guard let data = try await item.loadTransferable(type: Data.self) else {
-            throw AppError.loadFailed("Unable to load non-Photos item")
-        }
-        
-        // Generate a safe fallback name (very rare)
-        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "bin"
-        let name = TransferRequest.sanitizeFilename("file_\(UUID().uuidString.prefix(6)).\(ext)")
-        
-        return .init(
-            data: data,
-            filename: name,
-            mimeType: TransferRequest.mimeType(for: name)
-        )
+        throw AppError.loadFailed("Unable to extract item from item provider")
     }
 
     private func loadFromPhotos(id: String) async throws -> TransferRequest {
@@ -95,7 +102,7 @@ final class PhotoLibraryService {
 
         let filename = await determineFilename(for: asset, resource: resource, isVideo: isVideo)
         let safeName = TransferRequest.sanitizeFilename(filename)
-        let buffer = try await fetchAssetData(for: resource)
+        let buffer = try await fetchAssetData(for: resource, asset: asset)
 
         return .init(
             data: buffer,
@@ -104,20 +111,87 @@ final class PhotoLibraryService {
         )
     }
 
-    private func fetchAssetData(for resource: PHAssetResource) async throws -> Data {
+    private func fetchAssetData(for resource: PHAssetResource, asset: PHAsset) async throws -> Data {
+
+        switch asset.mediaType {
+        case .image:
+            return try await fetchImageData(asset: asset)
+
+        case .video:
+            return try await fetchVideoData(asset: asset)
+
+        default:
+            // fallback to resource-based extraction
+            return try await fetchRawResourceData(resource)
+        }
+    }
+    
+    private func fetchRawResourceData(_ resource: PHAssetResource) async throws -> Data {
         try await withCheckedThrowingContinuation { cont in
             let opts = PHAssetResourceRequestOptions()
             opts.isNetworkAccessAllowed = true
-            var buffer = Data()
-            buffer.reserveCapacity(2_000_000)
-            PHAssetResourceManager.default().requestData(for: resource, options: opts) { chunk in
-                buffer.append(chunk)
-            } completionHandler: { error in
-                if let error {
-                    cont.resume(throwing: error)
-                } else {
-                    cont.resume(returning: buffer)
+            
+            let buffer = NSMutableData()
+
+            PHAssetResourceManager.default().requestData(
+                for: resource,
+                options: opts,
+                dataReceivedHandler: { chunk in
+                    buffer.append(chunk)
+                },
+                completionHandler: { error in
+                    if let error = error {
+                        cont.resume(throwing: error)
+                    } else {
+                        cont.resume(returning: buffer as Data)
+                    }
                 }
+            )
+        }
+    }
+    
+    private func fetchVideoData(asset: PHAsset) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            let opts = PHVideoRequestOptions()
+            opts.version = .original
+            opts.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: opts) { avAsset, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    cont.resume(throwing: error)
+                    return
+                }
+                guard let urlAsset = avAsset as? AVURLAsset else {
+                    cont.resume(throwing: AppError.loadFailed("Video asset missing URL"))
+                    return
+                }
+
+                do {
+                    let data = try Data(contentsOf: urlAsset.url)
+                    cont.resume(returning: data)
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func fetchImageData(asset: PHAsset) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            let opts = PHImageRequestOptions()
+            opts.version = .original
+            opts.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: opts) { data, _, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    cont.resume(throwing: error)
+                    return
+                }
+                guard let data = data else {
+                    cont.resume(throwing: AppError.loadFailed("Image data missing"))
+                    return
+                }
+                cont.resume(returning: data)
             }
         }
     }

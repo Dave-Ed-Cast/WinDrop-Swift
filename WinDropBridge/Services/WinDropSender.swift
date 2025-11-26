@@ -14,10 +14,18 @@ final class WinDropSender: WinDropSending {
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
     
+    let maxSize: Int
+    let byte: Int
+    let factor: Int
+    
     init?(host: String, port: UInt16) {
         self.host = NWEndpoint.Host(host)
         guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
         self.port = nwPort
+        
+        self.maxSize = 512_000
+        self.factor = 256
+        self.byte = 1024
     }
     
     func send(_ request: TransferRequest) async -> String {
@@ -55,8 +63,8 @@ final class WinDropSender: WinDropSending {
         try await conn.sendAll(Data(meta.serialize().utf8))
         print(request.filename)
         
-        if request.data.count > 512_000 {
-            let chunkSize = 256 * 1024
+        if request.data.count > self.maxSize {
+            let chunkSize = self.factor * self.byte
             for offset in stride(from: 0, to: request.data.count, by: chunkSize) {
                 let end = min(offset + chunkSize, request.data.count)
                 try await conn.sendAll(request.data.subdata(in: offset..<end))
@@ -65,7 +73,7 @@ final class WinDropSender: WinDropSending {
             try await conn.sendAll(request.data)
         }
 
-        if let reply = try await conn.receive(maximumLength: 1024),
+        if let reply = try await conn.receive(maximumLength: self.byte),
            let text = String(data: reply, encoding: .utf8) {
             return "Server replied: \(text.trimmingCharacters(in: .whitespacesAndNewlines))"
         } else {
@@ -76,23 +84,36 @@ final class WinDropSender: WinDropSending {
     /// Streams a file as length-prefixed frames:
     /// [u32 big-endian length][length bytes] ... [0x00 00 00 00] EOF.
     @discardableResult
-    func sendFileStream(url: URL, filename: String? = nil, chunkSize: Int = 256 * 1024) async throws -> String {
+    func sendFileStream(url: URL, filename: String? = nil) async throws -> String {
         try await withConnection { conn in
-            let name = filename ?? url.lastPathComponent
-            let mime = (UTType(filenameExtension: url.pathExtension) ?? .data).preferredMIMEType ?? "application/octet-stream"
+            
+            let name = self.resolvedStreamFilename(url: url, override: filename)
+            
+            let mime = (UTType(filenameExtension: url.pathExtension) ?? .data)
+                .preferredMIMEType ?? "application/octet-stream"
 
             let meta = HeaderMeta(filename: name, size: 0, mime: mime, chunked: true)
             try await conn.sendAll(Data(meta.serialize().utf8))
 
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
+            
+            let chunkSize = self.factor * self.byte
+
             for try await chunk in handle.bytesAsync(chunkSize: chunkSize) {
                 try await self.sendChunkFrame(chunk, over: conn)
             }
+
             try await self.sendEOFFrame(over: conn)
-            _ = try? await conn.receive(maximumLength: 3) // optional ACK
+            _ = try? await conn.receive(maximumLength: 3)
+            
             return "Streamed \(name) successfully"
         }
+    }
+    
+    private func resolvedStreamFilename(url: URL, override: String? = nil) -> String {
+        if let override { return override }
+        return TransferRequest.sanitizeFilename(url.lastPathComponent)
     }
 }
 
