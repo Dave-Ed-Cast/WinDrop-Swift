@@ -10,8 +10,9 @@ import Photos
 import PhotosUI
 import _PhotosUI_SwiftUI
 
-/// Handles Photo library authorization and media extraction.
 final class PhotoLibraryService {
+    
+    /// Requests authorization
     func ensurePhotosAuth() async throws {
         let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if current == .authorized || current == .limited { return }
@@ -21,203 +22,45 @@ final class PhotoLibraryService {
         }
     }
 
-    /// Returns a `TransferRequest` with original data and MIME info.
-    func buildTransferRequest(from item: PhotosPickerItem) async throws -> TransferRequest {
-        guard let id = item.itemIdentifier else {
-            return try await loadFromItemProvider(item)
-        }
-        try await ensurePhotosAuth()
-        return try await loadFromPhotos(id: id)
-    }
-
-    private func loadFromItemProvider(_ item: PhotosPickerItem) async throws -> TransferRequest {
-        // 1️⃣ Files app or iCloud Drive → URL-backed
-        
-        if let url = try? await item.loadTransferable(type: URL.self) {
-            let name = TransferRequest.sanitizeFilename(url.lastPathComponent)
-            let data = try Data(contentsOf: url)
-            print("[PhotoLibraryService] Using URL branch, name = \(name)")
-            return .init(
-                data: data,
-                filename: name,
-                mimeType: TransferRequest.mimeType(for: name)
-            )
-        }
-
-        // 2️⃣ Photos app → use itemIdentifier to resolve filename + PHAssetResource
-        if let assetID = item.itemIdentifier {
-            print("[PhotoLibraryService] itemIdentifier = \(assetID)")
-            let results = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
-            if let asset = results.firstObject {
-                let resources = PHAssetResource.assetResources(for: asset)
-
-                guard let resource = resources.first else {
-                    throw AppError.resourceMissing
-                }
-
-                let data = try await fetchAssetData(for: resource, asset: asset)
-                let filename = TransferRequest.sanitizeFilename(resource.originalFilename)
-                print("[PhotoLibraryService] Using PHAsset branch, filename = \(filename)")
-
-                return .init(
-                    data: data,
-                    filename: filename,
-                    mimeType: TransferRequest.mimeType(for: filename)
-                )
-            } else {
-                print("[PhotoLibraryService] No PHAsset found for id \(assetID)")
-            }
-        } else {
-            print("[PhotoLibraryService] itemIdentifier is NIL")
-        }
-
-        // 3️⃣ Fallback — raw Data without metadata
-        if let data = try? await item.loadTransferable(type: Data.self) {
-            let name = "photo.jpg"
-            print("[PhotoLibraryService] FALLBACK branch, using name = \(name)")
-            return .init(
-                data: data,
-                filename: name,
-                mimeType: TransferRequest.mimeType(for: name)
-            )
-        }
-
-        throw AppError.loadFailed("Unable to extract item from item provider")
-    }
-
-    private func loadFromPhotos(id: String) async throws -> TransferRequest {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
-            throw AppError.assetNotFound
-        }
-
-        let isVideo = asset.mediaType == .video
-        let resources = PHAssetResource.assetResources(for: asset)
-
-        guard let resource = resources.first(where: {
-            isVideo ? ($0.type == .video || $0.type == .fullSizeVideo)
-                    : ($0.type == .photo || $0.type == .fullSizePhoto)
-        }) ?? resources.first else {
-            throw AppError.resourceMissing
-        }
-
-        let filename = await determineFilename(for: asset, resource: resource, isVideo: isVideo)
-        let safeName = TransferRequest.sanitizeFilename(filename)
-        let buffer = try await fetchAssetData(for: resource, asset: asset)
-
-        return .init(
-            data: buffer,
-            filename: safeName,
-            mimeType: TransferRequest.mimeType(for: safeName)
-        )
-    }
-
-    private func fetchAssetData(for resource: PHAssetResource, asset: PHAsset) async throws -> Data {
-
-        switch asset.mediaType {
-        case .image:
-            return try await fetchImageData(asset: asset)
-
-        case .video:
-            return try await fetchVideoData(asset: asset)
-
-        default:
-            // fallback to resource-based extraction
-            return try await fetchRawResourceData(resource)
-        }
+    /**
+     Converts a PhotosPickerItem (from SwiftUI's PhotosPicker)
+     into a Transfer Payload by calling the dedicated TransferRequest factory.
+     */
+    func buildTransferPayload(from item: PhotosPickerItem) async throws -> TransferPayload {
+        // This now calls the specific static factory method in TransferRequest that
+        // handles PhotosPickerItem's loadTransferable method.
+        return try await TransferRequest.create(from: item)
     }
     
-    private func fetchRawResourceData(_ resource: PHAssetResource) async throws -> Data {
-        try await withCheckedThrowingContinuation { cont in
-            let opts = PHAssetResourceRequestOptions()
-            opts.isNetworkAccessAllowed = true
-            
-            let buffer = NSMutableData()
-
-            PHAssetResourceManager.default().requestData(
-                for: resource,
-                options: opts,
-                dataReceivedHandler: { chunk in
-                    buffer.append(chunk)
-                },
-                completionHandler: { error in
-                    if let error = error {
-                        cont.resume(throwing: error)
+    // If you specifically need to handle PHAssets directly (not via Picker):
+    func buildFromAsset(_ asset: PHAsset) async throws -> TransferPayload {
+        // This is more complex because PHAsset doesn't automatically map to NSItemProvider
+        // simply. Usually, you fetch the resource data or URL.
+        
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard let resource = resources.first else { throw AppError.loadFailed("No resource") }
+        
+        let filename = TransferRequest.sanitizeFilename(resource.originalFilename)
+        
+        // Decide if Stream or Data based on type
+        if asset.mediaType == .video {
+             // Logic to request AVAsset and get URL...
+             // This requires PHImageManager logic usually.
+             throw AppError.loadFailed("Direct PHAsset video loading requires PHImageManager")
+        } else {
+            // Request Image Data
+            let data = try await withCheckedThrowingContinuation { continuation in
+                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: nil) { data, _, _, info in
+                    if let data = data {
+                        continuation.resume(returning: data)
                     } else {
-                        cont.resume(returning: buffer as Data)
+                        continuation.resume(throwing: AppError.loadFailed("Could not load image data"))
                     }
                 }
-            )
-        }
-    }
-    
-    private func fetchVideoData(asset: PHAsset) async throws -> Data {
-        try await withCheckedThrowingContinuation { cont in
-            let opts = PHVideoRequestOptions()
-            opts.version = .original
-            opts.isNetworkAccessAllowed = true
-
-            PHImageManager.default().requestAVAsset(forVideo: asset, options: opts) { avAsset, _, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    cont.resume(throwing: error)
-                    return
-                }
-                guard let urlAsset = avAsset as? AVURLAsset else {
-                    cont.resume(throwing: AppError.loadFailed("Video asset missing URL"))
-                    return
-                }
-
-                do {
-                    let data = try Data(contentsOf: urlAsset.url)
-                    cont.resume(returning: data)
-                } catch {
-                    cont.resume(throwing: error)
-                }
             }
+            
+            let mime = TransferRequest.mimeType(for: filename)
+            return .memory(request: TransferRequest(data: data, filename: filename, mimeType: mime))
         }
-    }
-    
-    private func fetchImageData(asset: PHAsset) async throws -> Data {
-        try await withCheckedThrowingContinuation { cont in
-            let opts = PHImageRequestOptions()
-            opts.version = .original
-            opts.isNetworkAccessAllowed = true
-
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: opts) { data, _, _, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    cont.resume(throwing: error)
-                    return
-                }
-                guard let data = data else {
-                    cont.resume(throwing: AppError.loadFailed("Image data missing"))
-                    return
-                }
-                cont.resume(returning: data)
-            }
-        }
-    }
-
-    private func determineFilename(
-        for asset: PHAsset,
-        resource: PHAssetResource,
-        isVideo: Bool
-    ) async -> String {
-        // 1️⃣ Get the initial candidate filename (exact from Photos)
-        var base = resource.originalFilename
-        if base.isEmpty { base = isVideo ? "video.mov" : "photo.jpg"  }
-
-        // 2️⃣ Sanitize (remove invalid characters)
-        base = TransferRequest.sanitizeFilename(base)
-
-        // 3️⃣ Get your save directory (Documents, or change as needed)
-        guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return base }
-        
-        var filename = TransferRequest.makeFilename(from: resource, asset: asset)
-        
-        if FileManager.default.fileExists(atPath: directory.appendingPathComponent(filename).path) {
-            filename = TransferRequest.makeFilename(from: resource, asset: asset, addDisambiguator: true)
-        }
-
-        // 5️⃣ Return the final safe and unique filename
-        return filename
     }
 }

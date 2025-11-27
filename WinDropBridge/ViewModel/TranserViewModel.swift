@@ -24,19 +24,38 @@ final class TransferViewModel {
         self.sender = sender
     }
     
+    // Assuming this is inside your ViewModel/Class that has photoService and sender properties
+
     func handleSelection(_ items: [PhotosPickerItem]) {
         Task.detached(priority: .userInitiated) {
             await withThrowingTaskGroup(of: Void.self) { group in
                 for item in items {
                     group.addTask {
                         do {
-                            // Each iteration builds its own connection + request
-                            let request = try await self.photoService.buildTransferRequest(from: item)
-                            let result = await self.sender.send(request)
+                            // 1. Build the payload
+                            let payload = try await self.photoService.buildTransferPayload(from: item)
+                            
+                            let result: String
+                            let filename: String
+                            
+                            // 2. Decide how to send based on payload type
+                            switch payload {
+                            case .memory(let request):
+                                // Case A: Small files (Images) -> Send TransferRequest (Data)
+                                result = await self.sender.send(request)
+                                filename = request.filename
 
+                            case .stream(let url, let streamFilename):
+                                // Case B: Large files (Video/PDF) -> Stream URL
+                                print("Starting stream for: \(streamFilename)")
+                                result = try await self.sender.sendFileStream(url: url, filename: streamFilename)
+                                filename = streamFilename
+                            }
+
+                            // 3. Update UI on MainActor
                             await MainActor.run {
-                                print("Sent \(request.filename): \(result)")
-                                self.status = "Sent \(request.filename)"
+                                print("Sent \(filename): \(result)")
+                                self.status = "Sent \(filename)"
                             }
                         } catch {
                             await MainActor.run {
@@ -47,6 +66,7 @@ final class TransferViewModel {
                     }
                 }
 
+                // Await all parallel tasks
                 do {
                     try await group.waitForAll()
                 } catch {

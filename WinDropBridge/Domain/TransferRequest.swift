@@ -9,11 +9,141 @@ import Foundation
 import UniformTypeIdentifiers
 import Photos
 import UIKit
+import _PhotosUI_SwiftUI
+
+
+// MARK: - Helper Enum for the Result
+enum TransferPayload {
+    /// Small files (Images) loaded into memory
+    case memory(request: TransferRequest)
+    /// Large files (Videos, PDFs) pointing to a file on disk
+    case stream(url: URL, filename: String)
+}
 
 struct TransferRequest {
     let data: Data
     let filename: String
     let mimeType: String?
+    
+    // MARK: - Supported Types
+    static let supportedTypes: [UTType] = [
+        // Images
+        .image, .jpeg, .png, .tiff, .heic, .heif,
+        // Video
+        .movie, .video, .mpeg4Movie, .quickTimeMovie,
+        // Audio
+        .audio, .mp3, .wav, .aiff, .mpeg,
+        // Documents
+        .pdf
+    ]
+    
+    // MARK: - Factory Logic (1: NSItemProvider / UIKit Compatible)
+
+    /// Main entry point for NSItemProvider (used by Share Extensions and older APIs)
+    static func create(from provider: NSItemProvider) async throws -> TransferPayload {
+        
+        // 1. Detect Type
+        guard let type = supportedTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
+            throw AppError.loadFailed("Unsupported file type")
+        }
+        
+        // 2. Load Item generically to help resolve the filename
+        let itemForName = try? await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
+        let rawName = await resolveFilename(provider: provider, item: itemForName ?? "")
+        let safeName = sanitizeFilename(rawName)
+
+        // 3. Branch Logic: Stream vs Memory
+        if type.conforms(to: .movie) || type.conforms(to: .video) || type.conforms(to: .audio) || type == .pdf {
+            let url = try await loadURL(from: provider, type: type)
+            return .stream(url: url, filename: safeName)
+        }
+        
+        if type.conforms(to: .image) {
+            let data = try await loadImageData(from: provider, type: type)
+            let mime = mimeType(for: safeName)
+            let request = TransferRequest(data: data, filename: safeName, mimeType: mime)
+            return .memory(request: request)
+        }
+        
+        throw AppError.loadFailed("Could not process data type")
+    }
+
+    // MARK: - Factory Logic (2: PhotosPickerItem / SwiftUI Compatible)
+
+    /// Main entry point for PhotosPickerItem (used by SwiftUI's PhotosPicker)
+    static func create(from item: PhotosPickerItem) async throws -> TransferPayload {
+        
+        // Get a generic unique filename prefix
+        let uniquePrefix = "file_\(UUID().uuidString)"
+        
+        // Find the most appropriate content type from the supported types
+        let preferredUTI = item.supportedContentTypes.first(where: { supportedTypes.contains($0) })
+
+        // 1. Try to load as a File URL (for streaming large items like videos)
+        if let url = try? await item.loadTransferable(type: URL.self) {
+            
+            // Determine the file extension: prioritize preferred extension from UTI,
+            // otherwise use a generic extension based on type if the temporary URL extension is missing.
+            let fileExtension: String
+            if let preferredExtension = preferredUTI?.preferredFilenameExtension, !preferredExtension.isEmpty {
+                fileExtension = preferredExtension
+            } else if url.pathExtension.isEmpty {
+                // Fallback for temporary files without extension (e.g., videos)
+                fileExtension = preferredUTI?.conforms(to: .video) == true ? "mp4" : "jpg"
+            } else {
+                // Use the extension from the temporary URL path
+                fileExtension = url.pathExtension
+            }
+            
+            let finalFilename = "\(uniquePrefix).\(fileExtension)"
+            let safeName = sanitizeFilename(finalFilename)
+
+            print("Successfully loaded URL from PhotosPickerItem: \(safeName)")
+            return .stream(url: url, filename: safeName)
+        }
+        
+        // 2. If URL failed, try to load as Data (for smaller images)
+        if let data = try? await item.loadTransferable(type: Data.self) {
+            
+            // Determine file extension for in-memory data
+            let fileExtension = preferredUTI?.preferredFilenameExtension ?? "jpg"
+            let suggestedFilename = "photo_\(Int(Date().timeIntervalSince1970)).\(fileExtension)"
+            let safeName = sanitizeFilename(suggestedFilename)
+
+            let mime = mimeType(for: safeName)
+            let request = TransferRequest(data: data, filename: safeName, mimeType: mime)
+            print("Successfully loaded Data from PhotosPickerItem: \(safeName)")
+            return .memory(request: request)
+        }
+        
+        throw AppError.loadFailed("PhotosPickerItem did not resolve to a file URL or Data")
+    }
+
+    // MARK: - Internal Loaders (NSItemProvider based)
+
+    private static func loadURL(from provider: NSItemProvider, type: UTType) async throws -> URL {
+        let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
+        guard let url = item as? URL else {
+            throw AppError.loadFailed("Could not resolve file URL")
+        }
+        return url
+    }
+
+    private static func loadImageData(from provider: NSItemProvider, type: UTType) async throws -> Data {
+        let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
+        
+        if let url = item as? URL {
+            return try Data(contentsOf: url)
+        } else if let image = item as? UIImage, let jpeg = image.jpegData(compressionQuality: 1.0) {
+            return jpeg
+        } else if let data = item as? Data {
+            return data
+        }
+        
+        throw AppError.loadFailed("Unsupported image data format")
+    }
+    
+    // MARK: - Utility Functions
     
     static func mimeType(for filename: String) -> String? {
         let ext = (filename as NSString).pathExtension.lowercased()
@@ -26,82 +156,24 @@ struct TransferRequest {
         let safe = name.unicodeScalars.map { invalid.contains($0) ? "_" : Character($0) }
         return String(safe)
     }
-    
-    /// Attempts to use the original Photos or Files filename, with optional disambiguator if duplicates exist.
-    static func makeFilename(
-        from resource: PHAssetResource,
-        asset: PHAsset? = nil,
-        addDisambiguator: Bool = false
-    ) -> String {
-        // 1️⃣ Prefer the original filename provided by Photos
-        var base = resource.originalFilename
-        
-        // 2️⃣ Fallback if Photos doesn’t provide any name
-        if base.isEmpty {
-            let isVideo = resource.uniformTypeIdentifier.contains("video")
-            base = isVideo ? "video.mov" : "photo.jpg"
-        }
-        
-        // 3️⃣ Clean invalid filesystem characters
-        base = sanitizeFilename(base)
-        
-        // 4️⃣ Optionally add a small suffix if we need to differentiate duplicates
-        guard addDisambiguator, let asset else { return base }
-        
-        let idSuffix = asset.localIdentifier.split(separator: "/").first?.prefix(5) ?? "dup"
-        let ext = (base as NSString).pathExtension
-        let stem = (base as NSString).deletingPathExtension
-        
-        return ext.isEmpty
-            ? "\(stem)_\(idSuffix)"
-            : "\(stem)_\(idSuffix).\(ext)"
-    }
-    
-    // MARK: - Unified filename resolver
 
-    /// Resolves the best filename for a shared item:
-    /// - If URL-backed → lastPathComponent
-    /// - If Photos asset → PHAssetResource.originalFilename
-    /// - Else fallback
     static func resolveFilename(provider: NSItemProvider, item: Any) async -> String {
-
-        // 1️⃣ If file-backed URL → easiest path
-        if let url = item as? URL {
-            return sanitizeFilename(url.lastPathComponent)
-        }
-
-        // 2️⃣ If coming from Photos app → try PHAsset-based filename
-        if let photoName = await resolveFilenameFromPhotos(provider: provider) {
-            return photoName
-        }
-
-        // 3️⃣ NEW — If `item` is actually coming from PHAssetResource directly
+        if let url = item as? URL { return sanitizeFilename(url.lastPathComponent) }
+        if let photoName = await resolveFilenameFromPhotos(provider: provider) { return photoName }
         if let asset = item as? PHAsset {
             let resources = PHAssetResource.assetResources(for: asset)
-            if let resource = resources.first {
-                return sanitizeFilename(resource.originalFilename)
-            }
+            return sanitizeFilename(resources.first?.originalFilename ?? "photo.jpg")
         }
-
-        if let resource = item as? PHAssetResource {
-            return sanitizeFilename(resource.originalFilename)
-        }
-
-        // 4️⃣ If UIImage → no original filename → fallback
-        if item is UIImage {
+        if provider.registeredTypeIdentifiers.contains(UTType.image.identifier) {
             return "photo_\(Int(Date().timeIntervalSince1970)).jpg"
         }
-
-        // 5️⃣ Default fallback
         return "file_\(UUID().uuidString)"
     }
     
-    /// Extract the real filename if the NSItemProvider originated from Photos
     static func resolveFilenameFromPhotos(provider: NSItemProvider) async -> String? {
         guard provider.registeredTypeIdentifiers.contains("com.apple.photos.asset") else {
             return nil
         }
-
         do {
             let assetId = try await provider.loadItem(
                 forTypeIdentifier: "com.apple.photos.asset",
@@ -109,48 +181,14 @@ struct TransferRequest {
             ) as? String
 
             guard let assetId else { return nil }
-
             let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
             guard let asset = assets.firstObject else { return nil }
-
             let resources = PHAssetResource.assetResources(for: asset)
             guard let res = resources.first else { return nil }
 
-            // ✔️ FIX: return the filename directly
             return sanitizeFilename(res.originalFilename)
 
         } catch {
-            return nil
-        }
-    }
-
-
-    // MARK: - Extract filename from PHAsset
-
-    private static func filenameFromPhotosAsset(provider: NSItemProvider) async -> String? {
-        do {
-            let item = try await provider.loadItem(
-                forTypeIdentifier: "com.apple.photos.asset",
-                options: nil
-            )
-
-            guard let assetID = item as? String else { return nil }
-
-            let results = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
-            guard let asset = results.firstObject else { return nil }
-
-            let resources = PHAssetResource.assetResources(for: asset)
-
-            // Prefer the primary resource (photo/video)
-            if let primary = resources.first(where: { $0.type == .photo || $0.type == .video }) {
-                return primary.originalFilename
-            }
-
-            // Otherwise return the first available resource's name
-            return resources.first?.originalFilename
-
-        } catch {
-            print("[TransferRequest] Failed to get Photos filename:", error)
             return nil
         }
     }

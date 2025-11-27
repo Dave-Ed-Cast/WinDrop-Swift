@@ -8,18 +8,19 @@
 import Foundation
 
 
-enum AppError: Error, LocalizedError {
+enum AppError: LocalizedError {
     case permissionDenied
-    case assetNotFound
-    case resourceMissing
     case loadFailed(String)
-    
+    case generic(String)
+
     var errorDescription: String? {
         switch self {
-        case .permissionDenied: return "Photos permission not granted"
-        case .assetNotFound: return "Selected asset not found"
-        case .resourceMissing: return "No valid resource for asset"
-        case .loadFailed(let msg): return msg
+        case .permissionDenied:
+            return "Photo Library access was denied."
+        case .loadFailed(let msg):
+            return "Failed to load item: \(msg)"
+        case .generic(let msg):
+            return msg
         }
     }
 }
