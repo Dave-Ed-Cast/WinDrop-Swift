@@ -52,7 +52,7 @@ final class ShareViewController: UIViewController {
                 || type == .pdf {
                 
                 let url = try await loadURL(from: provider, type: type)
-                let safeName = TransferRequest.sanitizeFilename(url.lastPathComponent)
+                let safeName = url.lastPathComponent.sanitizeFilename()
                 print("[ShareExtension] Starting stream: \(safeName)")
 
                 do {
@@ -95,7 +95,7 @@ final class ShareViewController: UIViewController {
     private func loadURL(from provider: NSItemProvider, type: UTType) async throws -> URL {
         let item = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
         guard let url = item as? URL else {
-            throw AppError.loadFailed("Unsupported URL type")
+            throw AppLogger.loadFailed("Unsupported URL type")
         }
         return url
     }
@@ -110,14 +110,14 @@ final class ShareViewController: UIViewController {
         } else if let image = item as? UIImage, let jpeg = image.jpegData(compressionQuality: 1.0) {
             data = jpeg
         } else {
-            throw AppError.loadFailed("Unsupported image item type")
+            throw AppLogger.loadFailed("Unsupported image item type")
         }
 
         // NEW → universal filename resolver
         let filename = await TransferRequest.resolveFilename(provider: provider, item: item)
 
-        let safe = TransferRequest.sanitizeFilename(filename)
-        let mime = TransferRequest.mimeType(for: safe)
+        let safe = filename.sanitizeFilename()
+        let mime = safe.mimeType()
 
         return .init(data: data, filename: safe, mimeType: mime)
     }

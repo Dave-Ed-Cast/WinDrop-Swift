@@ -113,7 +113,7 @@ final class WinDropSender: WinDropSending {
     
     private func resolvedStreamFilename(url: URL, override: String? = nil) -> String {
         if let override { return override }
-        return TransferRequest.sanitizeFilename(url.lastPathComponent)
+        return url.lastPathComponent.sanitizeFilename()
     }
 }
 

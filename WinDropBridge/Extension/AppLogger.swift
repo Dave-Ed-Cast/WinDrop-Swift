@@ -8,11 +8,11 @@
 import Foundation
 
 
-enum AppError: LocalizedError {
+enum AppLogger: LocalizedError {
     case permissionDenied
     case loadFailed(String)
     case generic(String)
-
+    
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
@@ -23,4 +23,6 @@ enum AppError: LocalizedError {
             return msg
         }
     }
+    
+    func log() { print("[\(String(describing: self))] Error: \(self.errorDescription ?? "Unknown Error")") }
 }

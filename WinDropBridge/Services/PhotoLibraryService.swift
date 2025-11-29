@@ -18,7 +18,7 @@ final class PhotoLibraryService {
         if current == .authorized || current == .limited { return }
         let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard newStatus == .authorized || newStatus == .limited else {
-            throw AppError.permissionDenied
+            throw AppLogger.permissionDenied
         }
     }
 
@@ -38,28 +38,28 @@ final class PhotoLibraryService {
         // simply. Usually, you fetch the resource data or URL.
         
         let resources = PHAssetResource.assetResources(for: asset)
-        guard let resource = resources.first else { throw AppError.loadFailed("No resource") }
+        guard let resource = resources.first else { throw AppLogger.loadFailed("No resource") }
         
-        let filename = TransferRequest.sanitizeFilename(resource.originalFilename)
+        let filename = resource.originalFilename.sanitizeFilename()
         
         // Decide if Stream or Data based on type
         if asset.mediaType == .video {
              // Logic to request AVAsset and get URL...
              // This requires PHImageManager logic usually.
-             throw AppError.loadFailed("Direct PHAsset video loading requires PHImageManager")
+             throw AppLogger.loadFailed("Direct PHAsset video loading requires PHImageManager")
         } else {
             // Request Image Data
             let data = try await withCheckedThrowingContinuation { continuation in
-                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: nil) { data, _, _, info in
+                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: nil) { data, _, _, _ in
                     if let data = data {
                         continuation.resume(returning: data)
                     } else {
-                        continuation.resume(throwing: AppError.loadFailed("Could not load image data"))
+                        continuation.resume(throwing: AppLogger.loadFailed("Could not load image data"))
                     }
                 }
             }
             
-            let mime = TransferRequest.mimeType(for: filename)
+            let mime = filename.mimeType()
             return .memory(request: TransferRequest(data: data, filename: filename, mimeType: mime))
         }
     }
