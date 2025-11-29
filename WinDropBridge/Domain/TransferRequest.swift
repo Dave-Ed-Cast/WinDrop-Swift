@@ -226,9 +226,4 @@ struct TransferRequest {
             return nil
         }
     }
-    
-    // MARK: - Filename resolution from PHAsset localIdentifier (PhotosPickerItem)
-    
-    
-    
 }

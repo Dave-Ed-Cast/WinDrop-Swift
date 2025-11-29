@@ -70,38 +70,18 @@
 		3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Extension/PhotosPickerItem.swift,
 				Info.plist,
 			);
 			target = 3E8800EC2EA2A65D006C95ED /* WinDropBridge */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		3E8C121A2EDBA7430081AA90 /* Exceptions for "WinDropBridge" folder in "Copy Bundle Resources" phase from "WinDropBridge" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = 3E8800EB2EA2A65D006C95ED /* Resources */;
-			membershipExceptions = (
-				Extension/PhotosPickerItem.swift,
-			);
-		};
-		3E8C121B2EDBA7430081AA90 /* Exceptions for "WinDropBridge" folder in "Copy Bundle Resources" phase from "Share" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = 3ED627872EA4419800AD4DEF /* Resources */;
-			membershipExceptions = (
-				Extension/PhotosPickerItem.swift,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3E8800EF2EA2A65D006C95ED /* WinDropBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */,
-				3E8C121A2EDBA7430081AA90 /* Exceptions for "WinDropBridge" folder in "Copy Bundle Resources" phase from "WinDropBridge" target */,
 				3E481E022EA4465F00B51C47 /* Exceptions for "WinDropBridge" folder in "Share" target */,
-				3E8C121B2EDBA7430081AA90 /* Exceptions for "WinDropBridge" folder in "Copy Bundle Resources" phase from "Share" target */,
 			);
 			path = WinDropBridge;
 			sourceTree = "<group>";
