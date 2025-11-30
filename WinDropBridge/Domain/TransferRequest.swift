@@ -53,7 +53,7 @@ struct TransferRequest {
             if type.conforms(to: .image) {
                 let data = try await loadImageData(from: provider, type: type)
                 let mime = fileName.mimeType()
-                let request = TransferRequest(data: data, filename: fileName, mimeType: mime)
+                let request = Self.init(data: data, filename: fileName, mimeType: mime)
                 return .memory(request: request)
             }
         } catch {
@@ -98,10 +98,10 @@ struct TransferRequest {
                     return "mp4"
                 }()
             } else {
-                ext = url.pathExtension
+                ext = url.pathExtension.lowercased()
             }
             
-            finalFilename = (fallbackName as NSString).deletingPathExtension + "." + ext
+            finalFilename = (fallbackName as NSString).deletingPathExtension + "." + ext.lowercased()
 
             
             let filename = finalFilename.sanitizeFilename()
@@ -118,7 +118,7 @@ struct TransferRequest {
                 return "jpg"
             }()
             
-            let finalFilename = (fallbackName as NSString).deletingPathExtension + "." + ext
+            let finalFilename = (fallbackName as NSString).deletingPathExtension + "." + ext.lowercased()
             let filename = finalFilename.sanitizeFilename()
             
             let mime = filename.mimeType()
