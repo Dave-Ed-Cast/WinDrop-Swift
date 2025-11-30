@@ -9,22 +9,28 @@ import Foundation
 import Network
 
 extension NWConnection {
+    enum NWError: Error {
+        case posix(POSIXErrorCode)
+        case dns(Int32)
+        case tls(OSStatus)
+    }
+    
     func send(content: Data) async throws {
-        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.send(content: content, completion: .contentProcessed { error in
-                if let error { c.resume(throwing: error) } else { c.resume() }
+                if let error { cont.resume(throwing: error) } else { cont.resume() }
             })
         }
     }
 
     func receive(maximumLength: Int) async throws -> Data? {
-        try await withCheckedThrowingContinuation { c in
+        try await withCheckedThrowingContinuation { cont in
             self.receive(minimumIncompleteLength: 1, maximumLength: maximumLength) { data, _, _, error in
-                if let error { c.resume(throwing: error) } else { c.resume(returning: data) }
+                if let error { cont.resume(throwing: error) } else { cont.resume(returning: data) }
             }
         }
     }
-    
+
     func sendAll(_ data: Data) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.send(content: data, completion: .contentProcessed { err in
@@ -32,7 +38,7 @@ extension NWConnection {
             })
         }
     }
-    
+
     func waitUntilReady(timeout: TimeInterval = 10) async throws {
         try await withCheckedThrowingContinuation { cont in
             self.stateUpdateHandler = { state in
@@ -51,5 +57,3 @@ extension NWConnection {
         }
     }
 }
-
-
