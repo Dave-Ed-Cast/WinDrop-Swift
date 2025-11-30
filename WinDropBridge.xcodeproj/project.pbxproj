@@ -46,6 +46,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Data/HeaderMeta.swift,
+				Data/TransferPayload.swift,
 				Domain/TransferRequest.swift,
 				Extension/AppLogger.swift,
 				Extension/BufferedNWConnection.swift,

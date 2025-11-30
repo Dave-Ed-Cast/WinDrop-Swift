@@ -113,8 +113,7 @@ final class ShareViewController: UIViewController {
             throw AppLogger.loadFailed("Unsupported image item type")
         }
 
-        // NEW → universal filename resolver
-        let filename = await TransferRequest.resolveFilename(provider: provider, item: item)
+        let filename = await provider.resolveFilename(item: item)
 
         let safe = filename.sanitizeFilename()
         let mime = safe.mimeType()
@@ -122,10 +121,7 @@ final class ShareViewController: UIViewController {
         return .init(data: data, filename: safe, mimeType: mime)
     }
     
-    // MARK: - PHAsset filename extraction
-
     private func loadAssetFilename(from provider: NSItemProvider) async -> String? {
-        // 1) Look for the Photos asset identifier (com.apple.photos.asset)
         guard provider.hasItemConformingToTypeIdentifier("com.apple.photos.asset") else {
             return nil
         }
@@ -138,11 +134,9 @@ final class ShareViewController: UIViewController {
 
             guard let assetID = item as? String else { return nil }
 
-            // 2) Fetch PHAsset
             let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
             guard let asset = result.firstObject else { return nil }
 
-            // 3) Extract real filename via PHAssetResource
             let resources = PHAssetResource.assetResources(for: asset)
 
             if let primary = resources.first(where: { $0.type == .photo || $0.type == .video }) {

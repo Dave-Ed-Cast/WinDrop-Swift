@@ -11,11 +11,6 @@ import Photos
 import UIKit
 import _PhotosUI_SwiftUI
 
-enum TransferPayload {
-    case memory(request: TransferRequest)
-    case stream(url: URL, filename: String)
-}
-
 struct TransferRequest {
     let data: Data
     let filename: String
@@ -32,7 +27,6 @@ struct TransferRequest {
         .pdf
     ]
     
-    
     /// Main entry point for NSItemProvider (used by Share Extensions and older APIs)
     static func create(from provider: NSItemProvider) async throws -> TransferPayload {
         
@@ -44,7 +38,7 @@ struct TransferRequest {
         
         do {
             let itemForName = try await provider.loadItem(forTypeIdentifier: type.identifier, options: nil)
-            let rawName = await resolveFilename(provider: provider, item: itemForName)
+            let rawName = await provider.resolveFilename(item: itemForName)
             fileName = rawName.sanitizeFilename()
         } catch {
             throw AppLogger.loadFailed("Could not load filename: \(error.localizedDescription)")
@@ -69,7 +63,10 @@ struct TransferRequest {
         throw AppLogger.loadFailed("Could not process data type")
     }
     
-    /// Main entry point for PhotosPickerItem (used by SwiftUI's PhotosPicker)
+    
+    /// Creates a payload to transfer starting from the item selected from the gallery.
+    /// - Parameter item: The media content from the gallery
+    /// - Returns: The transfer payload to use in a `TransferRequest`
     static func create(from item: PhotosPickerItem) async throws -> TransferPayload {
         
         let originalFilename: String?
@@ -79,14 +76,10 @@ struct TransferRequest {
             originalFilename = nil
         }
         
-        // Fallback, just in case
         let fallbackName = originalFilename?.sanitizeFilename() ?? "file_\(UUID().uuidString)"
         
-        // Try to load as a File URL (for streaming large items like videos)
         var loadedURL: URL?
         do {
-            // loadTransferable returns nil if the item is not readily available as a URL,
-            // or throws an error if the transfer fails (e.g., permissions, network error).
             loadedURL = try await item.loadTransferable(type: URL.self)
         } catch {
             AppLogger.loadFailed("WARNING: Url loading failed, Falling back to Data: \(error.localizedDescription)").log()
@@ -159,71 +152,5 @@ struct TransferRequest {
         }
         
         throw AppLogger.loadFailed("Unsupported image data format")
-    }
-    
-    // MARK: - Unified filename resolver (URL → Photos → UIImage → fallback)
-    
-    // Replaced existing function with your comprehensive version
-    static func resolveFilename(provider: NSItemProvider, item: Any) async -> String {
-        
-        // URL-backed
-        if let url = item as? URL {
-            return url.lastPathComponent.sanitizeFilename()
-        }
-        
-        // Photos PHAsset-based
-        if let photoName = await resolveFilenameFromPhotos(provider: provider) {
-            return photoName
-        }
-        
-        // Item is directly a PHAsset
-        if let asset = item as? PHAsset {
-            let resource = PHAssetResource.assetResources(for: asset)
-            if let res = resource.first {
-                return res.originalFilename.sanitizeFilename()
-            }
-        }
-        
-        // Item is directly a PHAssetResource
-        if let resource = item as? PHAssetResource {
-            return resource.originalFilename.sanitizeFilename()
-        }
-        
-        // UIImage fallback
-        if item is UIImage {
-            return "photo_\(Int(Date().timeIntervalSince1970)).jpg"
-        }
-        
-        // Generic fallback
-        return "file_\(UUID().uuidString)"
-    }
-    
-    // MARK: - Filename resolution for Photos (NSItemProvider)
-    
-    // Replaced existing function with your comprehensive version
-    static func resolveFilenameFromPhotos(provider: NSItemProvider) async -> String? {
-        guard provider.registeredTypeIdentifiers.contains("com.apple.photos.asset") else {
-            return nil
-        }
-        
-        do {
-            let assetId = try await provider.loadItem(
-                forTypeIdentifier: "com.apple.photos.asset",
-                options: nil
-            ) as? String
-            
-            guard let assetId else { return nil }
-            
-            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
-            guard let asset = assets.firstObject else { return nil }
-            
-            let resources = PHAssetResource.assetResources(for: asset)
-            guard let res = resources.first else { return nil }
-            
-            return res.originalFilename.sanitizeFilename()
-            
-        } catch {
-            return nil
-        }
     }
 }
