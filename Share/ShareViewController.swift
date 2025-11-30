@@ -104,7 +104,7 @@ final class ShareViewController: UIViewController {
             for provider in providers {
                 group.addTask {
                     
-                    let payload = try await TransferRequest.create(from: provider)
+                    let payload = try await provider.asTransferPayload()
                     
                     switch payload {
                     case .memory(let request):
@@ -146,7 +146,7 @@ final class ShareViewController: UIViewController {
             }
         }
         let supportedProviders = providers.filter { provider in
-            TransferRequest.supportedTypes.contains { utType in
+            UTType.supportedTypes.contains { utType in
                 provider.hasItemConformingToTypeIdentifier(utType.identifier)
             }
         }

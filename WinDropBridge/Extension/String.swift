@@ -45,31 +45,4 @@ extension String {
             return res.originalFilename.sanitizeFilename()
         }
     }
-    
-    // Replaced existing function with your comprehensive version
-    static func resolveFilenameFromPhotos(from provider: NSItemProvider) async -> String? {
-        guard provider.registeredTypeIdentifiers.contains("com.apple.photos.asset") else {
-            return nil
-        }
-        
-        do {
-            let assetId = try await provider.loadItem(
-                forTypeIdentifier: "com.apple.photos.asset",
-                options: nil
-            ) as? String
-            
-            guard let assetId else { return nil }
-            
-            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
-            guard let asset = assets.firstObject else { return nil }
-            
-            let resources = PHAssetResource.assetResources(for: asset)
-            guard let res = resources.first else { return nil }
-            
-            return res.originalFilename.sanitizeFilename()
-            
-        } catch {
-            return nil
-        }
-    }
 }

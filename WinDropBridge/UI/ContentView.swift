@@ -21,6 +21,9 @@ struct ContentView: View {
     }()
     @State private var selectedItems: [PhotosPickerItem] = []
     @State private var receiver = WinDropReceiver()
+    @State private var showingFilePicker = false
+    
+    let supportedTypes = UTType.supportedTypes
     
     var body: some View {
         VStack(spacing: 16) {
@@ -64,6 +67,26 @@ struct ContentView: View {
             .onChange(of: selectedItems) { _, newItems in
                 tvm.handleSelection(newItems)
             }
+            
+            Button {
+                showingFilePicker = true
+            } label: {
+                Text("Import from files")
+            }
+            .fileImporter(
+                isPresented: $showingFilePicker,
+                allowedContentTypes: supportedTypes,
+                allowsMultipleSelection: true,
+                onCompletion: { result in
+                    switch result {
+                    case .success(let urls):
+                        tvm.handleFileImport(urls)
+                    case .failure(let error):
+                        tvm.status = "File import failed \(error.localizedDescription)"
+                        AppLogger.loadFailed("File import failed \(error.localizedDescription)").log()
+                    }
+                }
+            )
             
             Text(tvm.status)
                 .foregroundColor(.gray)
