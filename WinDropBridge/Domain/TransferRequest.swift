@@ -27,7 +27,11 @@ struct TransferRequest {
         .pdf
     ]
     
-    /// Main entry point for NSItemProvider (used by Share Extensions and older APIs)
+    /// Creates a payload to transfer starting from the provider from the item selcted in share extension.
+    ///
+    /// *Used by Share Extension in iOS shortcuts*
+    /// - Parameter provider: The provider or conveying data or a file
+    /// - Returns: The transfer payload to use in a `TransferRequest`
     static func create(from provider: NSItemProvider) async throws -> TransferPayload {
         
         guard let type = supportedTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
@@ -53,7 +57,7 @@ struct TransferRequest {
             if type.conforms(to: .image) {
                 let data = try await loadImageData(from: provider, type: type)
                 let mime = fileName.mimeType()
-                let request = Self.init(data: data, filename: fileName, mimeType: mime)
+                let request = TransferRequest(data: data, filename: fileName, mimeType: mime)
                 return .memory(request: request)
             }
         } catch {
