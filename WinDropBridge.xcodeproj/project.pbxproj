@@ -49,6 +49,7 @@
 				Data/TransferPayload.swift,
 				Domain/AppLogger.swift,
 				Domain/TransferRequest.swift,
+				Domain/WinDropReceiverError.swift,
 				Extension/BufferedNWConnection.swift,
 				Extension/FileHandle.swift,
 				Extension/NSItemProvider.swift,
@@ -64,6 +65,13 @@
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
 		};
+		3EAD11222EDE208A00B89BAC /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3E8800EC2EA2A65D006C95ED /* WinDropBridge */;
+		};
 		3ED627972EA4419800AD4DEF /* Exceptions for "Share" folder in "Share" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -71,20 +79,13 @@
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
 		};
-		3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 3E8800EC2EA2A65D006C95ED /* WinDropBridge */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3E8800EF2EA2A65D006C95ED /* WinDropBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */,
+				3EAD11222EDE208A00B89BAC /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */,
 				3E481E022EA4465F00B51C47 /* Exceptions for "WinDropBridge" folder in "Share" target */,
 			);
 			path = WinDropBridge;

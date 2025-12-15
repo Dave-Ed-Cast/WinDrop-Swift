@@ -8,135 +8,121 @@
 import Foundation
 import Network
 import Photos
-
+import SwiftUI
 
 @MainActor
 @Observable
 final class WinDropReceiver {
+
     var lastMessage: String = "Idle"
-    
+
     private var listener: NWListener?
-    private var activeConnections: [ObjectIdentifier: (conn: NWConnection, queue: DispatchQueue)] = [:]
     private let port: NWEndpoint.Port = 5051
-    
+
     func start() {
         do {
-            listener = try NWListener(using: .tcp, on: port)
+            let params = NWParameters.tcp
+            params.allowLocalEndpointReuse = true
+
+            listener = try NWListener(using: params, on: port)
             lastMessage = "Listening on port \(port)"
         } catch {
-            lastMessage = "Failed to start listener: \(error)"
+            lastMessage = "Listener error: \(error)"
             return
         }
-        
+
         listener?.newConnectionHandler = { [weak self] conn in
-            guard let self else { return }
-            let id = ObjectIdentifier(conn)
-            let queue = DispatchQueue(label: "WinDropReceiver.conn.\(id)")
-            Task { @MainActor in self.activeConnections[id] = (conn, queue) }
-            conn.start(queue: queue)
-            Task { await self.handleConnection(conn, id: id) }
+            conn.start(queue: .global(qos: .userInitiated))
+            Task { await self?.handle(conn) }
         }
-        
+
         listener?.start(queue: .main)
     }
-    
-    private func handleConnection(_ conn: NWConnection, id: ObjectIdentifier) async {
-        defer {
-            conn.cancel()
-            activeConnections.removeValue(forKey: id)
-        }
+
+    private func handle(_ conn: NWConnection) async {
+        defer { conn.cancel() }
 
         do {
             let reader = BufferedNWConnection(conn)
-            let headerBytes = try await reader.readUntil(Data("ENDHEADER\n".utf8))
-            guard let headerText = String(data: headerBytes, encoding: .utf8),
-                  let meta = parseHeader(headerText) else {
-                lastMessage = "Invalid header"
+
+            // 1 — Read the header
+            let headerData = try await reader.readUntil(Data("ENDHEADER\n".utf8))
+
+            guard let headerStr = String(data: headerData, encoding: .utf8) else {
+                update("Invalid header encoding")
                 return
             }
 
+            guard let meta = HeaderMeta.parse(headerStr) else {
+                update("Header parse failed")
+                return
+            }
+
+            update("Receiving \(meta.filename)…")
+
+            // 2 — Prepare save path
             let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let saveURL = docs.appendingPathComponent(meta.filename)
+            let destURL = docs.appendingPathComponent(meta.filename)
 
-            lastMessage = "Receiving \(meta.filename)..."
-            try await reader.receiveFile(to: saveURL, size: meta.size)
-
-            lastMessage = "Saved to: \(saveURL.lastPathComponent)"
-            await saveToAppropriateLibrary(url: saveURL, mime: meta.mime)
-        } catch {
-            lastMessage = "Error: \(error.localizedDescription)"
-        }
-    }
-    
-    private func parseHeader(_ text: String) -> HeaderMeta? {
-        var filename = ""
-        var size: Int = 0
-        var mime = "application/octet-stream"
-        
-        for line in text.split(separator: "\n") {
-            if line.hasPrefix("FILENAME:") {
-                filename = String(line.dropFirst("FILENAME:".count))
-            } else if line.hasPrefix("SIZE:") {
-                size = Int(line.dropFirst("SIZE:".count)) ?? 0
-            } else if line.hasPrefix("MIME:") {
-                mime = String(line.dropFirst("MIME:".count))
-            }
-        }
-        return filename.isEmpty || size <= 0 ? nil : HeaderMeta(filename: filename, size: size, mime: mime)
-    }
-    
-    @MainActor
-    func saveToAppropriateLibrary(url: URL, mime: String) async {
-        if mime.starts(with: "image/") || mime.starts(with: "video/") {
-            let imported = await saveToPhotos(url: url, isVideo: mime.starts(with: "video/"))
-            if imported {
-                // delete the local copy if successfully added to Photos
-                try? FileManager.default.removeItem(at: url)
-                lastMessage = "Imported to Photos: \(url.lastPathComponent)"
+            // 3 — Receive the file (always required if meta.chunked == false)
+            if !meta.chunked {
+                try await reader.receiveFile(to: destURL, size: meta.size)
             } else {
-                lastMessage = "Failed to import to Photos, kept in Files."
+                // CHUNKED mode existed in your original pipeline — you never used it yet
+                update("Chunked mode not implemented")
+                return
             }
-        } else {
-            lastMessage = "Non-media file saved: \(url.lastPathComponent)"
+
+            update("Saved: \(meta.filename)")
+
+            // 4 — Import to Photos if applicable
+            await importIfNeeded(url: destURL, mime: meta.mime)
+
+        } catch {
+            update("Error: \(error.localizedDescription)")
         }
     }
-    
-    
+
+    // MARK: - Photos
+
     @MainActor
-    private func saveToPhotos(url: URL, isVideo: Bool) async -> Bool {
+    private func importIfNeeded(url: URL, mime: String) async {
+        let isPhoto = mime.starts(with: "image/")
+        let isVideo = mime.starts(with: "video/")
+
+        guard isPhoto || isVideo else {
+            update("Non-media file saved to Files")
+            return
+        }
+
         if PHPhotoLibrary.authorizationStatus(for: .addOnly) == .notDetermined {
             _ = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         }
+
         guard PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized else {
-            lastMessage = "Photos access denied."
-            return false
+            update("Photos permission denied")
+            return
         }
 
-        let ext = url.pathExtension.isEmpty ? (isVideo ? "mp4" : "jpg") : url.pathExtension
-        let tmpURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension(ext)
-
         do {
-            if FileManager.default.fileExists(atPath: tmpURL.path) {
-                try FileManager.default.removeItem(at: tmpURL)
-            }
-            try FileManager.default.copyItem(at: url, to: tmpURL)
-
             try await PHPhotoLibrary.performChangesAsync {
                 if isVideo {
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tmpURL)
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
                 } else {
-                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: tmpURL)
+                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
                 }
             }
 
-            try? FileManager.default.removeItem(at: tmpURL)
-            return true
+            try? FileManager.default.removeItem(at: url)
+            update("Imported to Photos")
+
         } catch {
-            print("[WinDropReceiver] Import error:", error)
-            try? FileManager.default.removeItem(at: tmpURL)
-            return false
+            update("Photos import failed: \(error.localizedDescription)")
         }
+    }
+
+    @MainActor
+    private func update(_ msg: String) {
+        lastMessage = msg
     }
 }

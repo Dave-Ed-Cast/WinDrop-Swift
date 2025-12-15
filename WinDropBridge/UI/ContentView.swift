@@ -20,8 +20,9 @@ struct ContentView: View {
         )
     }()
     @State private var selectedItems: [PhotosPickerItem] = []
-    @State private var receiver = WinDropReceiver()
     @State private var showingFilePicker = false
+    
+    @Bindable var receiver: WinDropReceiver
     
     let supportedTypes = UTType.supportedTypes
     
@@ -92,15 +93,6 @@ struct ContentView: View {
                 .foregroundColor(.gray)
                 .padding(.top, 8)
         }
-        .onAppear {
-            let recv = WinDropReceiver()
-            recv.start()
-            receiver = recv
-        }
         .padding()
     }
-}
-
-#Preview {
-    ContentView()
 }
