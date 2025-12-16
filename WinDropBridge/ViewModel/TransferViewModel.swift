@@ -11,7 +11,7 @@ import PhotosUI
 import Combine
 
 @Observable
-final class TransferViewModel {
+class TransferViewModel {
     var previewImageData: Data?
     var filename: String?
     var status: String = "Select a photo to send"

@@ -20,9 +20,9 @@ final class WinDropSender: WinDropSending {
     let transferThreshold: Int
     let streamingChunkSize: Int
     
-    init?(host: String, port: UInt16) {
+    init?(host: String, port: Int) {
         self.host = NWEndpoint.Host(host)
-        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return nil }
         self.port = nwPort
         
         // Set the sizes using the new static constants
