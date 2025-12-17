@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 import Photos
 
 final class ShareViewController: UIViewController {
-    private let sender: WinDropSender? = WinDropSender(host: "192.168.1.160", port: 5050)
+    private let sender: WinDropSender? = WinDropSender(host: "192.168.1.160", port: 5050, sessionToken: "defaul")
     
     private let statusLabel: UILabel = {
         let label = UILabel()

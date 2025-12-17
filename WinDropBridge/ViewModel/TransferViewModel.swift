@@ -11,13 +11,36 @@ import PhotosUI
 import Combine
 
 @Observable
-class TransferViewModel {
+final class TransferViewModel {
     var previewImageData: Data?
     var filename: String?
     var status: String = "Select a photo to send"
     
     private let photoService: PhotoLibraryService
-    private let sender: WinDropSending
+    private var sender: WinDropSending?
+    
+    var isReady: Bool {
+        sender != nil
+    }
+    
+    init(photoService: PhotoLibraryService) {
+        self.photoService = photoService
+    }
+    
+    
+    /// Called exactly once per QR scan
+    func bind(sender: WinDropSending) {
+        self.sender = sender
+        self.status = "Ready to send"
+        print("🔗 Sender bound to TransferViewModel")
+    }
+    
+    private func requireSender() throws -> WinDropSending {
+        guard let sender else {
+            throw AppLogger.loadFailed("Require sender")
+        }
+        return sender
+    }
     
     /// Creates a view model responsible for preparing and sending file/photo transfers.
     ///
@@ -80,15 +103,19 @@ class TransferViewModel {
                             
                             let result: String
                             let filename: String
+                            let sender = try await self.requireSender()
+                            
+                            print("require sender!")
                             
                             switch payload {
                             case .memory(let request):
-                                result = await self.sender.send(request)
+                                print("before result")
+                                result = await sender.send(request)
                                 filename = request.filename
                                 
                             case .stream(let url, let streamFilename):
                                 print("Starting stream for: \(streamFilename)")
-                                result = try await self.sender.sendFileStream(url: url, filename: streamFilename)
+                                result = try await sender.sendFileStream(url: url, filename: streamFilename)
                                 filename = streamFilename
                             }
                             

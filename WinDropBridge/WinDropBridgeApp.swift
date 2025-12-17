@@ -12,10 +12,11 @@ struct WinDropBridgeApp: App {
     
     @State var receiver = WinDropReceiver()
     @State var connector = WinDropConnector.shared
+    @State var session = AppSession()
 
     var body: some Scene {
         WindowGroup {
-            ContentView(connector: connector, receiver: receiver)
+            ContentView(session: session)
                 .onAppear {
                     receiver.start()
                 }

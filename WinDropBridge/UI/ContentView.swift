@@ -7,29 +7,36 @@
 
 import SwiftUI
 import PhotosUI
-import AVKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
-    
-    @State var connector: WinDropConnector
-    @Bindable var receiver: WinDropReceiver
-    
-    // This starts as nil and is only created once the QR handshake is successful
-    @State private var tvm: TransferViewModel? = nil
 
+    // App-level persistent state
+    @Bindable var session: AppSession
+
+    // View-only state
     @State private var selectedItems: [PhotosPickerItem] = []
     @State private var showingFilePicker = false
     @State private var showingQRScanner = false
 
-    let supportedTypes = UTType.supportedTypes
+    private var connector: WinDropConnector {
+        session.connector
+    }
+
+    private var tvm: TransferViewModel {
+        session.transferViewModel
+    }
+
+    private let supportedTypes = UTType.supportedTypes
 
     var body: some View {
         VStack(spacing: 20) {
+
             Text("WinDrop Client")
                 .font(.title2)
                 .bold()
 
-            // 1. Connection Status Info
+            // 1️⃣ Connection Status
             VStack(spacing: 4) {
                 if let host = connector.receiverHost {
                     let cleanHost = host.debugDescription.replacingOccurrences(of: "\"", with: "")
@@ -41,7 +48,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 }
-                
+
                 if let port = connector.receiverPort {
                     Text("Port: \(String(port.rawValue))")
                         .font(.system(.caption, design: .monospaced))
@@ -51,15 +58,19 @@ struct ContentView: View {
             .background(Color.gray.opacity(0.1))
             .cornerRadius(8)
 
-            // 2. File Metadata (if TVM exists)
-            if let tvm, let name = tvm.filename {
+            // 2️⃣ Transfer Status
+            if let name = tvm.filename {
                 Text("Selected: \(name)")
                     .font(.footnote)
                     .foregroundColor(.blue)
                     .lineLimit(1)
+            } else {
+                Text(tvm.status)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
             }
 
-            // 3. Scan QR Button
+            // 3️⃣ Scan QR
             Button {
                 showingQRScanner = true
             } label: {
@@ -69,7 +80,7 @@ struct ContentView: View {
 
             Divider().padding(.vertical)
 
-            // 4. Media Pickers (Only active if TVM is ready)
+            // 4️⃣ Pickers (enabled only when sender bound)
             Group {
                 PhotosPicker(
                     selection: $selectedItems,
@@ -80,7 +91,7 @@ struct ContentView: View {
                     Label("Choose Photos/Videos", systemImage: "photo.on.rectangle")
                 }
                 .buttonStyle(.bordered)
-                .disabled(tvm == nil) // Safety Gate
+                .disabled(!tvm.isReady)
 
                 Button {
                     showingFilePicker = true
@@ -88,75 +99,55 @@ struct ContentView: View {
                     Label("Import from Files", systemImage: "folder")
                 }
                 .buttonStyle(.bordered)
-                .disabled(tvm == nil) // Safety Gate
-                
-                Button("Force Init TVM") {
-                    if let host = connector.receiverHost, let port = connector.receiverPort {
-                         let hostString = host.debugDescription.replacingOccurrences(of: "\"", with: "")
-                         let sender = WinDropSender(host: "192.168.1.150", port: 5050)
-                         self.tvm = TransferViewModel(photoService: PhotoLibraryService(), sender: sender!)
-                         print("Manual Override: TVM Created")
-                    } else {
-                         print("Manual Override Failed: Host/Port still nil")
-                    }
-                }
-                .font(.caption)
-                .buttonStyle(.plain)
+                .disabled(!tvm.isReady)
             }
         }
         .padding()
-        
-        // --- Logic Handlers ---
-        
-        // Handle Photo Selection
+
+        // MARK: - Handlers
+
+        // Photo picker
         .onChange(of: selectedItems) { _, newItems in
-            if let tvm {
-                tvm.handleSelection(newItems)
-            }
+            tvm.handleSelection(newItems)
         }
-        
-        // Handle File Import
+
+        // QR → bind sender (ONE place, ONE time per scan)
+        .onChange(of: connector.sessionId) { _, _ in
+            guard
+                let host = connector.receiverHost,
+                let port = connector.receiverPort,
+                let token = connector.sessionId
+            else { return }
+
+            let hostString = host.debugDescription.replacingOccurrences(of: "\"", with: "")
+
+            guard let sender = WinDropSender(
+                host: hostString,
+                port: Int(port.rawValue),
+                sessionToken: token
+            ) else { return }
+
+            tvm.bind(sender: sender)
+        }
+
+        // File importer
         .fileImporter(
             isPresented: $showingFilePicker,
             allowedContentTypes: supportedTypes,
             allowsMultipleSelection: true
         ) { result in
-            guard let tvm else { return }
             switch result {
             case .success(let urls):
                 tvm.handleFileImport(urls)
             case .failure(let error):
-                tvm.status = "File import failed \(error.localizedDescription)"
+                tvm.status = "File import failed: \(error.localizedDescription)"
             }
         }
-        
-        // Handle QR Scanner Sheet
+
+        // QR scanner sheet
         .sheet(isPresented: $showingQRScanner) {
             QRCodeScannerSheet { base64 in
-                // Start the network handshake
                 connector.handleQRCode(base64String: base64) { _ in }
-            }
-        }
-        
-        // Replace your existing .onChange with this "Fast-Track" version
-        .onChange(of: connector.receiverHost) { _, newHost in
-            guard let host = newHost,
-                  let port = connector.receiverPort else {
-                print("⏳ Host updated, but port still missing...")
-                return
-            }
-
-            let hostString = host.debugDescription.replacingOccurrences(of: "\"", with: "")
-            
-            print("🚀 Fast-Tracking TVM creation for: \(hostString):\(port.rawValue)")
-            
-            if let sender = WinDropSender(host: hostString, port: Int(port.rawValue)) {
-                // We initialize the TVM immediately.
-                // We don't wait for the Windows machine to say "Ok".
-                self.tvm = TransferViewModel(
-                    photoService: PhotoLibraryService(),
-                    sender: sender
-                )
             }
         }
     }

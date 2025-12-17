@@ -61,10 +61,13 @@
 				Extension/String.swift,
 				Extension/URL.swift,
 				Extension/UTType.swift,
+				Services/AppSession.swift,
+				Services/PhotoLibraryService.swift,
 				Services/QRCodeScannerViewController.swift,
 				Services/WinDropConnector.swift,
 				Services/WinDropReceiver.swift,
 				Services/WinDropSender.swift,
+				ViewModel/TransferViewModel.swift,
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
 		};
