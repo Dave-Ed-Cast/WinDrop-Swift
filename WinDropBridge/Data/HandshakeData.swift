@@ -41,6 +41,6 @@ struct HandshakeResponse: Codable {
 }
 
 enum HandshakeStatus: String, Codable {
-    case ok
+    case ack
     case error
 }

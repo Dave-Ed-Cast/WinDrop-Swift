@@ -24,5 +24,5 @@ enum AppLogger: LocalizedError {
         }
     }
     
-    func log() { print("[\(String(describing: self))] Error: \(self.errorDescription ?? "Unknown Error")") }
+    func log() { print("[\(String(describing: self))] \(self.errorDescription ?? "Unknown Error")") }
 }

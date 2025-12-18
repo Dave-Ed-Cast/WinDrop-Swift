@@ -47,6 +47,7 @@
 			membershipExceptions = (
 				Data/HandshakeData.swift,
 				Data/HeaderMeta.swift,
+				Data/PersistedSession.swift,
 				Data/TransferPayload.swift,
 				Domain/AppLogger.swift,
 				Domain/TransferRequest.swift,
@@ -62,6 +63,7 @@
 				Extension/URL.swift,
 				Extension/UTType.swift,
 				Services/AppSession.swift,
+				Services/CaptureController.swift,
 				Services/PhotoLibraryService.swift,
 				Services/QRCodeScannerViewController.swift,
 				Services/WinDropConnector.swift,

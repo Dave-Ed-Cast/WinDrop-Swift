@@ -11,7 +11,7 @@ import SwiftUI
 struct WinDropBridgeApp: App {
     
     @State var receiver = WinDropReceiver()
-    @State var connector = WinDropConnector.shared
+    @State var connector = WinDropConnector()
     @State var session = AppSession()
 
     var body: some Scene {

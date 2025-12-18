@@ -10,14 +10,12 @@ import UIKit
 import SwiftUI
 import AVFoundation
 
+@MainActor
 final class QRCodeScannerViewController: UIViewController {
 
-    private let captureSession = AVCaptureSession()
-    private let captureQueue = DispatchQueue(label: "windrop.capture.queue")
-
+    private let capture = CaptureController()
     private var previewLayer: AVCaptureVideoPreviewLayer?
 
-    /// Called once when a QR code is successfully scanned
     var onQRCodeScanned: ((String) -> Void)?
 
     override func viewDidLoad() {
@@ -28,10 +26,8 @@ final class QRCodeScannerViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        stopSession()
+        capture.stop()
     }
-
-    // MARK: - Permissions
 
     private func checkCameraPermissionAndSetup() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -40,71 +36,28 @@ final class QRCodeScannerViewController: UIViewController {
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard granted else {
-                    DispatchQueue.main.async {
-                        self?.dismiss(animated: true)
-                    }
+                    Task { @MainActor in self?.dismiss(animated: true) }
                     return
                 }
-                self?.setupCamera()
+                Task { @MainActor in self?.setupCamera() }
             }
         default:
             dismiss(animated: true)
         }
     }
 
-    // MARK: - Camera Setup
-
     private func setupCamera() {
-        captureQueue.async { [weak self] in
-            guard let self else { return }
+        let preview = AVCaptureVideoPreviewLayer(session: capture.session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.bounds
+        view.layer.addSublayer(preview)
+        previewLayer = preview
 
-            self.captureSession.beginConfiguration()
-
-            guard
-                let device = AVCaptureDevice.default(for: .video),
-                let input = try? AVCaptureDeviceInput(device: device),
-                self.captureSession.canAddInput(input)
-            else {
-                self.captureSession.commitConfiguration()
-                return
-            }
-
-            self.captureSession.addInput(input)
-
-            let output = AVCaptureMetadataOutput()
-            guard self.captureSession.canAddOutput(output) else {
-                self.captureSession.commitConfiguration()
-                return
-            }
-
-            self.captureSession.addOutput(output)
-
-            self.captureSession.commitConfiguration()
-
-            DispatchQueue.main.async {
-                output.setMetadataObjectsDelegate(self, queue: .main)
-                output.metadataObjectTypes = [.qr]
-                let preview = AVCaptureVideoPreviewLayer(session: self.captureSession)
-                preview.videoGravity = .resizeAspectFill
-                preview.frame = self.view.layer.bounds
-                self.view.layer.addSublayer(preview)
-                self.previewLayer = preview
-            }
-
-            self.captureSession.startRunning()
-        }
-    }
-
-    private func stopSession() {
-        captureQueue.async { [weak self] in
-            guard let self, self.captureSession.isRunning else { return }
-            self.captureSession.stopRunning()
-        }
+        capture.start(delegate: self)
     }
 }
 
 // MARK: - QR Delegate
-
 extension QRCodeScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
 
     func metadataOutput(
@@ -117,24 +70,20 @@ extension QRCodeScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
             let value = object.stringValue
         else { return }
 
-        stopSession()
+        capture.stop()
         dismiss(animated: true)
-
         onQRCodeScanned?(value)
     }
 }
-
-
-
 
 struct QRCodeScannerSheet: UIViewControllerRepresentable {
 
     let onScanned: (String) -> Void
 
     func makeUIViewController(context: Context) -> QRCodeScannerViewController {
-        let vc = QRCodeScannerViewController()
-        vc.onQRCodeScanned = onScanned
-        return vc
+        let qrvc = QRCodeScannerViewController()
+        qrvc.onQRCodeScanned = onScanned
+        return qrvc
     }
 
     func updateUIViewController(

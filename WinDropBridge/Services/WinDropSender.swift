@@ -9,7 +9,13 @@ import Foundation
 import Network
 import UniformTypeIdentifiers
 
-final class WinDropSender: WinDropSending {
+final class WinDropSender: WinDropSending, Equatable {
+    
+    static func == (lhs: WinDropSender, rhs: WinDropSender) -> Bool {
+        return lhs.host == rhs.host &&
+               lhs.port == rhs.port &&
+               lhs.sessionToken == rhs.sessionToken
+    }
     
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
