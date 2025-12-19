@@ -9,9 +9,17 @@ import SwiftUI
 
 @main
 struct WinDropBridgeApp: App {
+    
+    @State var receiver = WinDropReceiver()
+    @State var connector = WinDropConnector()
+    @State var session = AppSession()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(session: session)
+                .onAppear {
+                    receiver.start()
+                }
         }
     }
 }

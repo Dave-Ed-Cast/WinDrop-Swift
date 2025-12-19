@@ -45,10 +45,13 @@
 		3E481E022EA4465F00B51C47 /* Exceptions for "WinDropBridge" folder in "Share" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Data/HandshakeData.swift,
 				Data/HeaderMeta.swift,
+				Data/PersistedSession.swift,
 				Data/TransferPayload.swift,
 				Domain/AppLogger.swift,
 				Domain/TransferRequest.swift,
+				Domain/WinDropReceiverError.swift,
 				Extension/BufferedNWConnection.swift,
 				Extension/FileHandle.swift,
 				Extension/NSItemProvider.swift,
@@ -59,10 +62,23 @@
 				Extension/String.swift,
 				Extension/URL.swift,
 				Extension/UTType.swift,
+				Services/AppSession.swift,
+				Services/CaptureController.swift,
+				Services/PhotoLibraryService.swift,
+				Services/QRCodeScannerViewController.swift,
+				Services/WinDropConnector.swift,
 				Services/WinDropReceiver.swift,
 				Services/WinDropSender.swift,
+				ViewModel/TransferViewModel.swift,
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
+		};
+		3EAD11222EDE208A00B89BAC /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3E8800EC2EA2A65D006C95ED /* WinDropBridge */;
 		};
 		3ED627972EA4419800AD4DEF /* Exceptions for "Share" folder in "Share" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -71,20 +87,13 @@
 			);
 			target = 3ED627882EA4419800AD4DEF /* Share */;
 		};
-		3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 3E8800EC2EA2A65D006C95ED /* WinDropBridge */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3E8800EF2EA2A65D006C95ED /* WinDropBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				3EE721EF2EB932520012C30A /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */,
+				3EAD11222EDE208A00B89BAC /* Exceptions for "WinDropBridge" folder in "WinDropBridge" target */,
 				3E481E022EA4465F00B51C47 /* Exceptions for "WinDropBridge" folder in "Share" target */,
 			);
 			path = WinDropBridge;
@@ -425,6 +434,7 @@
 				INFOPLIST_FILE = WinDropBridge/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "I surely need it.";
 				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "I really need it.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "I truly need it.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "I need it.";
@@ -467,6 +477,7 @@
 				INFOPLIST_FILE = WinDropBridge/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "I surely need it.";
 				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "I really need it.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "I truly need it.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "I need it.";

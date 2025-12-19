@@ -9,10 +9,17 @@ import Foundation
 import Network
 import UniformTypeIdentifiers
 
-final class WinDropSender: WinDropSending {
+final class WinDropSender: WinDropSending, Equatable {
+    
+    static func == (lhs: WinDropSender, rhs: WinDropSender) -> Bool {
+        return lhs.host == rhs.host &&
+               lhs.port == rhs.port &&
+               lhs.sessionToken == rhs.sessionToken
+    }
     
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
+    private let sessionToken: String
     
     private static let Kilobyte: Int = 1024
     private static let Megabyte: Int = 1024 * Kilobyte
@@ -20,10 +27,11 @@ final class WinDropSender: WinDropSending {
     let transferThreshold: Int
     let streamingChunkSize: Int
     
-    init?(host: String, port: UInt16) {
+    init?(host: String, port: Int, sessionToken: String) {
         self.host = NWEndpoint.Host(host)
-        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return nil }
         self.port = nwPort
+        self.sessionToken = sessionToken
         
         // Set the sizes using the new static constants
         self.transferThreshold = 512 * Self.Kilobyte // 512 KB
@@ -35,13 +43,26 @@ final class WinDropSender: WinDropSending {
             Task {
                 do {
                     let reply = try await withConnection { conn in
-                        try await self.sendRequest(request, over: conn)
+                        try await self.performHandshake(conn)
+                        return try await self.sendRequest(request, over: conn)
                     }
                     cont.resume(returning: reply)
                 } catch {
                     cont.resume(returning: "Send failed: \(error.localizedDescription)")
                 }
             }
+        }
+    }
+    
+    private func performHandshake(_ conn: NWConnection) async throws {
+        // Send token + newline
+        try await conn.sendAll(Data((sessionToken + "\n").utf8))
+        
+        // Wait for server ACCEPT response
+        guard let reply = try await conn.receive(maximumLength: 32),
+              let resp = String(data: reply, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              resp == "ACCEPT" else {
+            throw NSError(domain: "WinDropSender", code: 1, userInfo: [NSLocalizedDescriptionKey: "Handshake rejected"])
         }
     }
     
@@ -63,7 +84,7 @@ final class WinDropSender: WinDropSending {
     @discardableResult
     func sendFileStream(url: URL, filename: String? = nil) async throws -> String {
         try await withConnection { conn in
-            
+            try await self.performHandshake(conn)
             let name = self.resolvedStreamFilename(url: url, override: filename)
             
             let mime = (UTType(filenameExtension: url.pathExtension) ?? .data)
@@ -117,7 +138,7 @@ final class WinDropSender: WinDropSending {
         
         // Using a constant for byte size here would also be good for clarity
         if let reply = try await conn.receive(maximumLength: 1024),
-            let text = String(data: reply, encoding: .utf8) {
+           let text = String(data: reply, encoding: .utf8) {
             return "Server replied: \(text.trimmingCharacters(in: .whitespacesAndNewlines))"
         } else {
             return "No reply from server"

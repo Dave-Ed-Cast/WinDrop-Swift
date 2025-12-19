@@ -7,100 +7,144 @@
 
 import SwiftUI
 import PhotosUI
-import AVKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @State private var tvm: TransferViewModel = {
-        guard let sender = WinDropSender(host: "192.168.1.160", port: 5050) else {
-            fatalError("Could not create WinDropSender (invalid host or port)")
-        }
-        return TransferViewModel(
-            photoService: PhotoLibraryService(),
-            sender: sender
-        )
-    }()
-    @State private var selectedItems: [PhotosPickerItem] = []
-    @State private var receiver = WinDropReceiver()
-    @State private var showingFilePicker = false
     
-    let supportedTypes = UTType.supportedTypes
+    // App-level persistent state
+    @Bindable var session: AppSession
+    @State private var tvm: TransferViewModel?
+    
+    // View-only state
+    @State private var selectedItems: [PhotosPickerItem] = []
+    @State private var showingFilePicker = false
+    @State private var showingQRScanner = false
+    
+    private let supportedTypes = UTType.supportedTypes
+    private let connector = WinDropConnector()
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
+            
             Text("WinDrop Client")
                 .font(.title2)
                 .bold()
             
-            if let data = tvm.previewImageData, let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFit()
-                    .cornerRadius(12)
-                    .shadow(radius: 4)
-                    .containerRelativeFrame(.horizontal) { length, _ in length * 0.9 }
-                    .containerRelativeFrame(.vertical) { length, _ in length * 0.6 }
+            // MARK: - Connection status
+            
+            if let persisted = session.persistedSession {
+                VStack(spacing: 4) {
+                    Text("Persisted: \(persisted.host):\(Int(persisted.port))")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(8)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
+            } else {
+                Text("Status: Not Connected")
+                    .font(.caption)
+                    .foregroundColor(.red)
             }
             
-            if let name = tvm.filename {
-                Text(name)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            // MARK: - Transfer status
+            
+            if let tvm {
+                if let name = tvm.filename {
+                    Text("Selected: \(name)")
+                        .font(.footnote)
+                        .foregroundColor(.blue)
+                        .lineLimit(1)
+                } else {
+                    Text(tvm.status)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
             }
             
-            Text(receiver.lastMessage)
-                .font(.footnote)
-                .foregroundColor(.gray)
-                .padding()
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-            
-            PhotosPicker(
-                "Choose Photo or Video to upload",
-                selection: $selectedItems,
-                maxSelectionCount: 10,
-                matching: .any(of: [.images, .videos]),
-                photoLibrary: .shared()
-            )
-            .buttonStyle(.borderedProminent)
-            .onChange(of: selectedItems) { _, newItems in
-                tvm.handleSelection(newItems)
-            }
+            // MARK: - Scan QR
             
             Button {
-                showingFilePicker = true
+                showingQRScanner = true
             } label: {
-                Text("Import from files")
+                Label("Scan QR Code", systemImage: "qrcode.viewfinder")
             }
-            .fileImporter(
-                isPresented: $showingFilePicker,
-                allowedContentTypes: supportedTypes,
-                allowsMultipleSelection: true,
-                onCompletion: { result in
-                    switch result {
-                    case .success(let urls):
-                        tvm.handleFileImport(urls)
-                    case .failure(let error):
-                        tvm.status = "File import failed \(error.localizedDescription)"
-                        AppLogger.loadFailed("File import failed \(error.localizedDescription)").log()
-                    }
-                }
-            )
+            .buttonStyle(.borderedProminent)
             
-            Text(tvm.status)
-                .foregroundColor(.gray)
-                .padding(.top, 8)
-        }
-        .onAppear {
-            let recv = WinDropReceiver()
-            recv.start()
-            receiver = recv
+            Divider().padding(.vertical)
+            
+            // MARK: - Pickers (enabled only when sender exists)
+            
+            Group {
+                PhotosPicker(
+                    selection: $selectedItems,
+                    maxSelectionCount: 10,
+                    matching: .any(of: [.images, .videos]),
+                    photoLibrary: .shared()
+                ) {
+                    Label("Choose Photos/Videos", systemImage: "photo.on.rectangle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(session.sender == nil)
+                
+                Button {
+                    showingFilePicker = true
+                } label: {
+                    Label("Import from Files", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .disabled(session.sender == nil)
+            }
         }
         .padding()
+        
+        // MARK: - Handlers
+        
+        // 🔑 Single source of truth: sender availability
+        .onChange(of: session.sender) { _, sender in
+            guard let sender else {
+                tvm = nil
+                return
+            }
+            
+            if tvm == nil {
+                tvm = TransferViewModel(
+                    photoService: PhotoLibraryService(),
+                    sender: sender
+                )
+            }
+        }
+        
+        .onChange(of: selectedItems) { _, newItems in
+            tvm?.handleSelection(newItems)
+        }
+        
+        .onAppear {
+            if let sender = session.sender, tvm == nil {
+                tvm?.status = "on appear recreation"
+                tvm = TransferViewModel(photoService: PhotoLibraryService(), sender: sender)
+            }
+        }
+        
+        .fileImporter(
+            isPresented: $showingFilePicker,
+            allowedContentTypes: supportedTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            guard let tvm else { return }
+            
+            switch result {
+            case .success(let urls): tvm.handleFileImport(urls)
+            case .failure(let error): tvm.status = "File import failed: \(error.localizedDescription)"
+            }
+        }
+        
+        .sheet(isPresented: $showingQRScanner) {
+            QRCodeScannerSheet { base64 in
+                connector.handleQRCode(base64String: base64) { handshake in
+                    session.activateSession(from: handshake)
+                }
+            }
+        }
     }
-}
-
-#Preview {
-    ContentView()
 }
