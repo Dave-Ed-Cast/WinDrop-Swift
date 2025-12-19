@@ -47,6 +47,8 @@ final class AppSession {
     }
 
     private func restoreIfAvailable() {
+        guard sender == nil else { return }
+
         guard
             let data = UserDefaults.standard.data(forKey: Self.storageKey),
             let session = try? JSONDecoder().decode(PersistedSession.self, from: data)

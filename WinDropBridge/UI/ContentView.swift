@@ -13,7 +13,6 @@ struct ContentView: View {
     
     // App-level persistent state
     @Bindable var session: AppSession
-    
     @State private var tvm: TransferViewModel?
     
     // View-only state
@@ -101,8 +100,14 @@ struct ContentView: View {
         
         // MARK: - Handlers
         
+        // 🔑 Single source of truth: sender availability
         .onChange(of: session.sender) { _, sender in
-            if let sender, tvm == nil {
+            guard let sender else {
+                tvm = nil
+                return
+            }
+            
+            if tvm == nil {
                 tvm = TransferViewModel(
                     photoService: PhotoLibraryService(),
                     sender: sender
@@ -116,10 +121,11 @@ struct ContentView: View {
         
         .onAppear {
             if let sender = session.sender, tvm == nil {
+                tvm?.status = "on appear recreation"
                 tvm = TransferViewModel(photoService: PhotoLibraryService(), sender: sender)
             }
         }
-
+        
         .fileImporter(
             isPresented: $showingFilePicker,
             allowedContentTypes: supportedTypes,
