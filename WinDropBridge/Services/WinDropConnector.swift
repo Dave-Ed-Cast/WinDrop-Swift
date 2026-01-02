@@ -27,6 +27,9 @@ final class WinDropConnector {
             return
         }
         
+        // Save QR code data
+        saveQRCodeData(handshake)
+        
         Task { @MainActor in
             self.receiverHost = NWEndpoint.Host(handshake.receiverIp)
             self.receiverPort = NWEndpoint.Port(integerLiteral: UInt16(handshake.receiverPort))
@@ -39,6 +42,24 @@ final class WinDropConnector {
             // Now attempt the actual TCP connection
             connect(to: handshake)
         }
+    }
+    
+    // MARK: - QR Code Storage
+    
+    private func saveQRCodeData(_ handshake: HandshakeData) {
+        let defaults = UserDefaults.standard
+        
+        // Save as a dictionary for easy retrieval
+        let qrData: [String: Any] = [
+            "receiverIp": handshake.receiverIp,
+            "receiverPort": handshake.receiverPort,
+            "sessionToken": handshake.sessionToken,
+            "publicKey": handshake.publicKey,
+            "scannedAt": ISO8601DateFormatter().string(from: Date())
+        ]
+        
+        defaults.set(qrData, forKey: "lastScannedQRCode")
+        print("💾 QR code data saved: \(handshake.receiverIp):\(handshake.receiverPort) with token \(handshake.sessionToken)")
     }
     
     // MARK: - Decode
@@ -120,55 +141,59 @@ final class WinDropConnector {
     // MARK: - Handshake
     
     private func sendHandshake(token: String) {
-        let request = HandshakeRequest(
-            type: "handshake",
-            version: 1,
-            sessionToken: token + "\n",
-            client: "ios",
-            clientVersion: "1.0.0"
-        )
+        // Send the session token with newline (as expected by server)
+        let tokenWithNewline = token + "\n"
+        guard let data = tokenWithNewline.data(using: .utf8) else { return }
         
-        guard let data = try? JSONEncoder().encode(request) else { return }
-        
-        sendFrame(data)
-        receiveResponse()
+        connection?.send(content: data, completion: .contentProcessed { [weak self] error in
+            if let error {
+                print("❌ Failed to send handshake:", error)
+                self?.cleanup()
+                return
+            }
+            self?.receiveHandshakeResponse()
+        })
     }
     
-    private func receiveResponse() {
-        receiveFrame { [weak self] data in
-            guard let self = self, let data = data else { return }
+    private func receiveHandshakeResponse() {
+        // Receive response without framing (ACCEPT or REJECT as plain text)
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 256) { [weak self] data, _, _, error in
+            guard let self = self else { return }
             
-            do {
-                let response = try JSONDecoder().decode(HandshakeResponse.self, from: data)
+            if let error {
+                print("❌ Failed to receive handshake response:", error)
+                self.cleanup()
+                return
+            }
+            
+            guard let data = data else {
+                print("❌ No handshake response received")
+                self.cleanup()
+                return
+            }
+            
+            let response = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            
+            if response == "ACCEPT" {
+                print("✅ Server accepted handshake")
                 
-                if response.status == "ok" {
-                    print("✅ Session accepted: \(response.sessionId ?? "-")")
-                    
-                    Task { @MainActor in
-                        // 1. Safely extract host and port from the existing connection
-                        if let endpoint = self.connection?.endpoint,
-                           case let .hostPort(host, port) = endpoint {
-                            
-                            // 2. Assign the host and port directly
-                            // We use the 'host' object directly instead of converting to string and back
-                            self.receiverHost = host
-                            self.receiverPort = port
-                        }
-                        
-                        // 3. Store the session ID
-                        self.sessionId = response.sessionId
-                        
-                        // 4. Corrected Print statement for debugging
-                        let hostStr = self.receiverHost?.debugDescription ?? "nil"
-                        let portRaw = self.receiverPort?.rawValue ?? 0
-                        print("📱 UI Properties updated: \(hostStr):\(portRaw)")
+                Task { @MainActor in
+                    // Extract host and port from the existing connection
+                    if let endpoint = self.connection?.endpoint,
+                       case let .hostPort(host, port) = endpoint {
+                        self.receiverHost = host
+                        self.receiverPort = port
                     }
-                } else {
-                    print("❌ Server returned error status: \(response.status)")
-                    self.cleanup()
+                    
+                    let hostStr = self.receiverHost?.debugDescription ?? "nil"
+                    let portRaw = self.receiverPort?.rawValue ?? 0
+                    print("📱 Connection ready: \(hostStr):\(portRaw)")
                 }
-            } catch {
-                print("❌ Response Decode Error: \(error)")
+            } else if response == "REJECT" {
+                print("❌ Server rejected handshake - invalid or expired session token")
+                self.cleanup()
+            } else {
+                print("❌ Unexpected server response: \(response)")
                 self.cleanup()
             }
         }

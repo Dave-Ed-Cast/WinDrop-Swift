@@ -26,10 +26,8 @@ struct HandshakeData: Codable {
 /// Initial handshake message sent to Windows
 struct HandshakeRequest: Codable {
     let type: String
-    let version: Int
-    let sessionToken: String
     let client: String
-    let clientVersion: String
+    let sessionToken: String
 }
 
 /// Response from Windows
@@ -38,9 +36,4 @@ struct HandshakeResponse: Codable {
     let sessionId: String?
     let expiresInMs: Int?
     let reason: String?
-}
-
-enum HandshakeStatus: String, Codable {
-    case ok
-    case error
 }
