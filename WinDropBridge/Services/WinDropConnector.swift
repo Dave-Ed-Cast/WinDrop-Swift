@@ -17,9 +17,123 @@ final class WinDropConnector {
     var receiverHost: NWEndpoint.Host? = nil
     var receiverPort: NWEndpoint.Port? = nil
     var sessionId: String? = nil
+    var savedSessions: [SavedSession] = []
     
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "windrop.connection.queue")
+    private let sessionsStorageKey = "windrop.saved_sessions"
+    private var pendingHandshake: HandshakeData? = nil  // Per persistenza dopo validazione
+    
+    // Sessione attualmente in uso
+    var currentSession: SavedSession? {
+        didSet {
+            if let session = currentSession {
+                receiverHost = NWEndpoint.Host(session.receiverIp)
+                receiverPort = NWEndpoint.Port(integerLiteral: UInt16(session.receiverPort))
+                sessionId = session.id
+            }
+        }
+    }
+    
+    // Inizializzazione: carica le sessioni salvate
+    init() {
+        loadSessions()
+    }
+    
+    // MARK: - Session Persistence
+    
+    /// Carica tutte le sessioni salvate da UserDefaults
+    private func loadSessions() {
+        guard let data = UserDefaults.standard.data(forKey: sessionsStorageKey) else {
+            print("📭 No saved sessions found")
+            return
+        }
+        
+        do {
+            let sessions = try JSONDecoder().decode([SavedSession].self, from: data)
+            self.savedSessions = sessions
+            
+            // Se c'è almeno una sessione, usala come sessione corrente
+            if let mostRecent = sessions.max(by: { $0.lastUsedAt < $1.lastUsedAt }) {
+                self.currentSession = mostRecent
+                print("📱 Restored session: \(mostRecent.displayName)")
+            }
+        } catch {
+            print("❌ Failed to load sessions: \(error)")
+        }
+    }
+    
+    /// Salva tutte le sessioni su UserDefaults
+    private func saveSessions() {
+        do {
+            let data = try JSONEncoder().encode(savedSessions)
+            UserDefaults.standard.set(data, forKey: sessionsStorageKey)
+            print("💾 Saved \(savedSessions.count) session(s)")
+        } catch {
+            print("❌ Failed to save sessions: \(error)")
+        }
+    }
+    
+    /// Aggiunge una nuova sessione validata
+    func addSession(_ session: SavedSession) {
+        // Evita duplicati basati su sessionId
+        savedSessions.removeAll { $0.id == session.id }
+        savedSessions.insert(session, at: 0)
+        saveSessions()
+        
+        // Usa la nuova sessione come corrente
+        currentSession = session
+        print("✅ Session added and set as current: \(session.displayName)")
+    }
+    
+    /// Rimuove una sessione salvata
+    func removeSession(_ session: SavedSession) {
+        savedSessions.removeAll { $0.id == session.id }
+        
+        // Se era la sessione corrente, passa a quella più recente
+        if currentSession?.id == session.id {
+            currentSession = savedSessions.first
+        }
+        
+        saveSessions()
+        print("🗑️ Session removed: \(session.displayName)")
+    }
+    
+    /// Cambia la sessione attualmente in uso
+    func switchSession(_ session: SavedSession) {
+        currentSession = session
+        var updated = session
+        updated.updateLastUsed()
+        
+        // Aggiorna nella lista
+        if let index = savedSessions.firstIndex(where: { $0.id == session.id }) {
+            savedSessions[index] = updated
+            saveSessions()
+        }
+        
+        print("🔄 Switched to session: \(session.displayName)")
+        
+        // Trigger sessionId change to rebind sender in UI
+        Task { @MainActor in
+            self.sessionId = session.id
+        }
+    }
+    
+    /// Ripristina la connessione a una sessione salvata (per riavvio app)
+    func reconnectToSession(_ session: SavedSession) {
+        print("🔌 Reconnecting to saved session: \(session.displayName)")
+        switchSession(session)
+        
+        // Crea un HandshakeData virtuale per il riconnect
+        let handshake = HandshakeData(
+            receiverIp: session.receiverIp,
+            receiverPort: session.receiverPort,
+            sessionToken: session.sessionToken,
+            publicKey: session.publicKey
+        )
+        
+        connect(to: handshake)
+    }
     
     func handleQRCode(base64String: String, completion: @escaping (HandshakeData) -> Void) {
         guard let handshake = decodeHandshake(from: base64String) else {
@@ -111,6 +225,9 @@ final class WinDropConnector {
     }
     
     private func connect(to handshake: HandshakeData) {
+        // Salva il handshake per usarlo dopo la validazione
+        self.pendingHandshake = handshake
+        
         // Create the host and port once
         let host = NWEndpoint.Host(handshake.receiverIp)
         let port = NWEndpoint.Port(integerLiteral: UInt16(handshake.receiverPort))
@@ -185,6 +302,14 @@ final class WinDropConnector {
                         self.receiverPort = port
                     }
                     
+                    // Crea e salva la sessione validata
+                    if let handshake = self.pendingHandshake {
+                        // Use the sessionToken as the ID - this is what the server knows
+                        let savedSession = SavedSession(from: handshake, sessionId: handshake.sessionToken, localReceivePort: 5051)
+                        self.addSession(savedSession)
+                        self.pendingHandshake = nil
+                    }
+                    
                     let hostStr = self.receiverHost?.debugDescription ?? "nil"
                     let portRaw = self.receiverPort?.rawValue ?? 0
                     print("📱 Connection ready: \(hostStr):\(portRaw)")
@@ -211,6 +336,14 @@ final class WinDropConnector {
             }
         })
     }
+    
+    /// Clears all saved sessions
+        func flushAllSessions() {
+            savedSessions.removeAll()
+            currentSession = nil
+            saveSessions()
+            print("🗑️ All sessions flushed")
+        }
     
     private func parseHostPort(_ value: String) -> (host: String, port: Int)? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

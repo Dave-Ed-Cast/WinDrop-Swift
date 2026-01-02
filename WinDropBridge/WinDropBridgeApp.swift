@@ -16,10 +16,31 @@ struct WinDropBridgeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(session: session)
+            ContentView(session: session, receiver: receiver)
                 .onAppear {
-                    receiver.start()
+                    startReceiver()
+                }
+                .onChange(of: connector.currentSession) { _, newSession in
+                    // Restart receiver when session changes
+                    if let session = newSession {
+                        print("🔄 Session changed, restarting receiver on port \(session.localReceivePort)")
+                        receiver.start(
+                            port: session.localReceivePort,
+                            sessionToken: session.sessionToken
+                        )
+                    }
                 }
         }
+    }
+    
+    private func startReceiver() {
+        // Start receiver with the most recent saved session's port and token
+        if let currentSession = connector.currentSession {
+            receiver.start(
+                port: currentSession.localReceivePort,
+                sessionToken: currentSession.sessionToken
+            )
+        }
+        // If no saved session, receiver won't start (user needs to scan QR first)
     }
 }

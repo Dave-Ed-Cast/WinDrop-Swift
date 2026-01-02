@@ -13,13 +13,13 @@ final class BufferedNWConnection {
     private let conn: NWConnection
     private var buffer: Data
     private let chunkSize: Int
-
+    
     init(_ conn: NWConnection) {
         self.conn = conn
         self.buffer = Data()
         self.chunkSize = 8192
     }
-
+    
     /// Reads until delimiter bytes appear; returns payload before delimiter.
     func readUntil(_ delimiter: Data) async throws -> Data {
         precondition(!delimiter.isEmpty)
@@ -35,7 +35,7 @@ final class BufferedNWConnection {
             buffer.append(more)
         }
     }
-
+    
     /// Receives up to `n` bytes (respects buffered overflow first).
     func receive(upTo size: Int) async throws -> Data {
         if !buffer.isEmpty {
@@ -46,7 +46,7 @@ final class BufferedNWConnection {
         }
         return try await receiveChunk(max: size)
     }
-
+    
     private func receiveChunk(max: Int) async throws -> Data {
         try await withCheckedThrowingContinuation { cont in
             conn.receive(minimumIncompleteLength: 1, maximumLength: max) { data, _, isComplete, error in
@@ -64,9 +64,24 @@ final class BufferedNWConnection {
             }
         }
     }
-
+    
     nonisolated private func makeError(_ msg: String) -> NSError {
         NSError(domain: "BufferedNWConnection", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
+    }
+    
+    /// Sends all data, ensuring it's fully transmitted.
+    func sendAll(_ data: Data) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            Task {
+                conn.send(content: data, completion: .contentProcessed { error in
+                    if let error {
+                        cont.resume(throwing: error)
+                    } else {
+                        cont.resume()
+                    }
+                })
+            }
+        }
     }
     
     /// Stream file to disk. Throws if fewer than `size` bytes are written.
@@ -78,7 +93,7 @@ final class BufferedNWConnection {
         FileManager.default.createFile(atPath: url.path, contents: nil)
         let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
-
+        
         var written = 0
         // First, flush any overflow already buffered
         if !buffer.isEmpty {
@@ -87,7 +102,7 @@ final class BufferedNWConnection {
             buffer.removeSubrange(..<buffer.index(buffer.startIndex, offsetBy: take))
             written += take
         }
-
+        
         while written < size {
             let toRead = min(8192, size - written)
             let chunk = try await receive(upTo: toRead)
@@ -95,7 +110,7 @@ final class BufferedNWConnection {
             try handle.write(contentsOf: chunk)
             written += chunk.count
         }
-
+        
         if written != size {
             throw NSError(domain: "BufferedNWConnection", code: -2, userInfo: [
                 NSLocalizedDescriptionKey: "File truncated: wrote \(written) of \(size) bytes"

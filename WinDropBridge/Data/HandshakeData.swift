@@ -28,6 +28,7 @@ struct HandshakeRequest: Codable {
     let type: String
     let client: String
     let sessionToken: String
+    let receiverListenPort: Int
 }
 
 /// Response from Windows

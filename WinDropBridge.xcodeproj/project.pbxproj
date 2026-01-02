@@ -47,6 +47,7 @@
 			membershipExceptions = (
 				Data/HandshakeData.swift,
 				Data/HeaderMeta.swift,
+				Data/SavedSession.swift,
 				Data/TransferPayload.swift,
 				Domain/AppLogger.swift,
 				Domain/TransferRequest.swift,
