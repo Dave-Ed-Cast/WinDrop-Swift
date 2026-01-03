@@ -148,6 +148,9 @@ struct ContentView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
+                
+                Text(connector.deviceName)
+                    .foregroundStyle(.white)
             }
         }
         .padding(8)

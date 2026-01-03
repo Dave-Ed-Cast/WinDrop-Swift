@@ -21,6 +21,8 @@ final class WinDropConnector {
     var localReceivePort: Int? = nil  // iOS device's own port for receiving files
     var savedSessions: [SavedSession] = []
     
+    let deviceName: String = UIDevice.current.name + "" + UIDevice.current.systemVersion
+    
     /// Callback to start the receiver when handshake completes
     var onHandshakeSuccess: ((_ port: Int, _ sessionToken: String) -> Void)? = nil
     
@@ -430,6 +432,7 @@ final class WinDropConnector {
     
     /// Resolve the actual device name (informational only)
     private static func resolveDeviceName() -> String {
-        UIDevice.current.name
+        return UIDevice.current.name + "" + UIDevice.current.systemVersion
     }
 }
+
