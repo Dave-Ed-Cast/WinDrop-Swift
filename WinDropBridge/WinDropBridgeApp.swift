@@ -19,9 +19,14 @@ struct WinDropBridgeApp: App {
             ContentView(session: session, receiver: receiver)
                 .onAppear {
                     startReceiver()
+                    // Set up callback to start receiver immediately when handshake completes
+                    WinDropConnector.shared.onHandshakeSuccess = { port, token in
+                        print("📱 Handshake callback: starting receiver on port \(port)")
+                        receiver.start(port: port, sessionToken: token)
+                    }
                 }
                 .onChange(of: connector.currentSession) { _, newSession in
-                    // Restart receiver when session changes
+                    // Backup: also restart receiver when session changes
                     if let session = newSession {
                         print("🔄 Session changed, restarting receiver on port \(session.localReceivePort)")
                         receiver.start(

@@ -8,6 +8,7 @@
 
 import Foundation
 import Network
+import UIKit
 
 @Observable
 final class WinDropConnector {
@@ -17,7 +18,13 @@ final class WinDropConnector {
     var receiverHost: NWEndpoint.Host? = nil
     var receiverPort: NWEndpoint.Port? = nil
     var sessionId: String? = nil
+    var localReceivePort: Int? = nil  // iOS device's own port for receiving files
     var savedSessions: [SavedSession] = []
+    
+    let deviceName: String = UIDevice.current.name + "" + UIDevice.current.systemVersion
+    
+    /// Callback to start the receiver when handshake completes
+    var onHandshakeSuccess: ((_ port: Int, _ sessionToken: String) -> Void)? = nil
     
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "windrop.connection.queue")
@@ -31,6 +38,7 @@ final class WinDropConnector {
                 receiverHost = NWEndpoint.Host(session.receiverIp)
                 receiverPort = NWEndpoint.Port(integerLiteral: UInt16(session.receiverPort))
                 sessionId = session.id
+                localReceivePort = session.localReceivePort
             }
         }
     }
@@ -97,6 +105,14 @@ final class WinDropConnector {
         
         saveSessions()
         print("🗑️ Session removed: \(session.displayName)")
+    }
+    
+    /// Clears all saved sessions
+    func flushAllSessions() {
+        savedSessions.removeAll()
+        currentSession = nil
+        saveSessions()
+        print("🗑️ All sessions flushed")
     }
     
     /// Cambia la sessione attualmente in uso
@@ -258,9 +274,38 @@ final class WinDropConnector {
     // MARK: - Handshake
     
     private func sendHandshake(token: String) {
-        // Send the session token with newline (as expected by server)
-        let tokenWithNewline = token + "\n"
-        guard let data = tokenWithNewline.data(using: .utf8) else { return }
+        // Build handshake request with iOS local receive port
+        // iOS listens on port 5051 for receiving files
+        let localPort = 5051
+        
+        let deviceName = Self.resolveDeviceName()  // Informational only, not used for validation
+        let handshakeRequest = HandshakeRequest(
+            type: "HANDSHAKE",
+            client: "iOS",
+            sessionToken: token,
+            receiverListenPort: localPort,
+            deviceName: deviceName
+        )
+        
+        guard let jsonData = try? JSONEncoder().encode(handshakeRequest),
+              var jsonString = String(data: jsonData, encoding: .utf8) else {
+            print("❌ Failed to encode handshake request")
+            cleanup()
+            return
+        }
+        
+        // 🔍 Debug: Print the exact JSON being sent
+        print("📤 Sending handshake JSON: \(jsonString.trimmingCharacters(in: .whitespacesAndNewlines))")
+        print("🎯 iOS advertising listen port: \(localPort)")
+        
+        jsonString.append("\n")
+        guard let data = jsonString.data(using: .utf8) else {
+            cleanup()
+            return
+        }
+        
+        // Store the local port we're advertising
+        self.localReceivePort = localPort
         
         connection?.send(content: data, completion: .contentProcessed { [weak self] error in
             if let error {
@@ -303,11 +348,15 @@ final class WinDropConnector {
                     }
                     
                     // Crea e salva la sessione validata
-                    if let handshake = self.pendingHandshake {
+                    if let handshake = self.pendingHandshake, let localPort = self.localReceivePort {
                         // Use the sessionToken as the ID - this is what the server knows
-                        let savedSession = SavedSession(from: handshake, sessionId: handshake.sessionToken, localReceivePort: 5051)
+                        let savedSession = SavedSession(from: handshake, sessionId: handshake.sessionToken, localReceivePort: localPort)
                         self.addSession(savedSession)
                         self.pendingHandshake = nil
+                        
+                        // 🔥 Immediately notify the app to start the receiver
+                        print("🎯 Starting receiver on port \(localPort) with token \(handshake.sessionToken)")
+                        self.onHandshakeSuccess?(localPort, handshake.sessionToken)
                     }
                     
                     let hostStr = self.receiverHost?.debugDescription ?? "nil"
@@ -336,14 +385,6 @@ final class WinDropConnector {
             }
         })
     }
-    
-    /// Clears all saved sessions
-        func flushAllSessions() {
-            savedSessions.removeAll()
-            currentSession = nil
-            saveSessions()
-            print("🗑️ All sessions flushed")
-        }
     
     private func parseHostPort(_ value: String) -> (host: String, port: Int)? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -386,4 +427,12 @@ final class WinDropConnector {
         connection?.cancel()
         connection = nil
     }
+    
+    // MARK: - Device Name Resolution
+    
+    /// Resolve the actual device name (informational only)
+    private static func resolveDeviceName() -> String {
+        return UIDevice.current.name + "" + UIDevice.current.systemVersion
+    }
 }
+
